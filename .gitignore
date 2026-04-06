@@ -7,6 +7,9 @@ dist/
 # OS files
 .DS_Store
 
+# Editor files
+.vscode/
+
 # Env files
 .env
 .env.*
