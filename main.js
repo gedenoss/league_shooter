@@ -212,8 +212,8 @@ coopMenuEl.style.userSelect = "none";
 coopMenuEl.style.cursor = "auto";
 coopMenuEl.innerHTML = `
   <div style="
-    width:min(920px, calc(100vw - 28px));
-    padding:18px 16px 16px;
+    width:min(560px, calc(100vw - 28px));
+    padding:18px 16px;
     border-radius:12px;
     background:#111418;
     border:1px solid #3a3f46;
@@ -222,19 +222,19 @@ coopMenuEl.innerHTML = `
     text-align:center;
     font-family:system-ui, sans-serif;">
     <div style="font:700 16px/1 monospace; letter-spacing:1px; color:#d7d7d7; margin-bottom:8px;">CO-OP</div>
-    <div style="font:700 28px/1.05 monospace; letter-spacing:0.5px; margin-bottom:8px;">HEBERGER OU REJOINDRE</div>
-    <div style="font:400 13px/1.4 monospace; color:#b8bcc2; margin-bottom:16px;">Un code a 6 chiffres permet de synchroniser la partie et les pauses.</div>
-    <div id="coop-status" style="font:700 14px/1.2 monospace; color:#8fd2ff; margin-bottom:14px;">En attente...</div>
-    <div id="coop-code-row" style="display:none; margin-bottom:14px; font:700 26px/1 monospace; letter-spacing:4px; color:#fff;"></div>
-    <div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; margin-bottom:12px;">
-      <button id="coop-host-btn" type="button" style="padding:14px 16px; border:1px solid #58789a; border-radius:8px; background:#17314a; color:#fff; font:700 16px/1 monospace; cursor:pointer;">HEBERGER</button>
-      <button id="coop-join-btn" type="button" style="padding:14px 16px; border:1px solid #6b7b8b; border-radius:8px; background:#1a1d22; color:#fff; font:700 16px/1 monospace; cursor:pointer;">REJOINDRE</button>
+    <div style="font:700 24px/1.05 monospace; letter-spacing:0.5px; margin-bottom:8px;">PARTIE COOP</div>
+    <div style="font:400 13px/1.4 monospace; color:#b8bcc2; margin-bottom:12px;">1) Heberge pour obtenir un code. 2) Rejoins avec un code a 6 chiffres.</div>
+    <div id="coop-status" style="font:700 14px/1.3 monospace; color:#8fd2ff; margin-bottom:12px;">Choisis une action.</div>
+    <div id="coop-code-row" style="display:none; margin-bottom:12px; font:700 26px/1 monospace; letter-spacing:4px; color:#fff;"></div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
+      <button id="coop-host-btn" type="button" style="padding:12px 14px; border:1px solid #58789a; border-radius:8px; background:#17314a; color:#fff; font:700 15px/1 monospace; cursor:pointer;">HEBERGER</button>
+      <button id="coop-join-btn" type="button" style="padding:12px 14px; border:1px solid #6b7b8b; border-radius:8px; background:#1a1d22; color:#fff; font:700 15px/1 monospace; cursor:pointer;">REJOINDRE</button>
     </div>
-    <div style="display:grid; grid-template-columns:1fr auto; gap:10px; align-items:center; margin-bottom:14px;">
-      <input id="coop-code-input" maxlength="6" inputmode="numeric" placeholder="ENTRER LE CODE" style="width:100%; padding:14px 16px; border-radius:8px; border:1px solid #4a4f57; background:#1a1d22; color:#fff; font:700 18px/1 monospace; letter-spacing:4px; text-transform:uppercase;" />
-      <button id="coop-back-btn" type="button" style="padding:14px 16px; border:1px solid #4a4f57; border-radius:8px; background:#111418; color:#fff; font:700 14px/1 monospace; cursor:pointer;">FERMER</button>
+    <div style="display:grid; grid-template-columns:1fr auto; gap:10px; align-items:center; margin-bottom:10px;">
+      <input id="coop-code-input" maxlength="6" inputmode="numeric" placeholder="CODE 6 CHIFFRES" style="width:100%; padding:12px 14px; border-radius:8px; border:1px solid #4a4f57; background:#1a1d22; color:#fff; font:700 17px/1 monospace; letter-spacing:4px; text-transform:uppercase;" />
+      <button id="coop-back-btn" type="button" style="padding:12px 14px; border:1px solid #4a4f57; border-radius:8px; background:#111418; color:#fff; font:700 13px/1 monospace; cursor:pointer;">FERMER</button>
     </div>
-    <div id="coop-timer" style="font:700 12px/1 monospace; letter-spacing:1.2px; color:#b6bcc7;">–</div>
+    <div id="coop-timer" style="font:700 12px/1 monospace; letter-spacing:1.2px; color:#b6bcc7;">Attente joueur...</div>
   </div>
 `;
 document.body.appendChild(coopMenuEl);
@@ -339,7 +339,7 @@ function setCoopCode(code) {
 
 function setCoopTimer(seconds) {
   if (coopTimerEl) {
-    coopTimerEl.textContent = `${seconds.toFixed(1)}s`;
+    coopTimerEl.textContent = `Pause: ${seconds.toFixed(1)}s`;
   }
 }
 
@@ -380,7 +380,7 @@ function openCoopMenu() {
     coopCodeInputEl.focus();
   }
   if (coopTimerEl) {
-    coopTimerEl.textContent = "–";
+    coopTimerEl.textContent = "Attente joueur...";
   }
 }
 
@@ -441,8 +441,12 @@ function handleCoopMessage(message) {
   if (message.type === "room_joined") {
     coopState.roomCode = message.code;
     coopState.role = "guest";
+    coopState.pauseOpen = false;
     setCoopStatus("Rejoint. En attente de l'hebergeur.");
     setCoopCode(message.code);
+    if (coopTimerEl) {
+      coopTimerEl.textContent = "Attente lancement partie...";
+    }
     coopClient.lobbyReady();
     return;
   }
@@ -499,6 +503,9 @@ function handleCoopMessage(message) {
   }
 
   if (message.type === "pause_timeout") {
+    if (!coopState.pauseOpen && !upgradeMenuActive) {
+      return;
+    }
     resolveCoopPause(coopState.selectedCardId, null);
     setCoopStatus("Pause terminee par timeout.");
     return;

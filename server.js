@@ -254,11 +254,17 @@ wss.on("connection", (ws) => {
 setInterval(() => {
   const now = Date.now();
   for (const [code, room] of rooms.entries()) {
-    if (room.menuDeadlineAt && now > room.menuDeadlineAt) {
+    if (
+      room.gameStarted &&
+      room.menuOpenAt &&
+      room.menuDeadlineAt &&
+      now > room.menuDeadlineAt
+    ) {
       broadcast(room, {
         type: "pause_timeout",
         roomCode: code,
       });
+      room.menuOpenAt = null;
       room.menuDeadlineAt = null;
     }
 
