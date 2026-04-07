@@ -40,6 +40,15 @@ const ZOMBIE_VARIANTS = [
   },
 ];
 
+const COOP_UPGRADE_IDS = [
+  "attack-speed",
+  "double-jump",
+  "extra-life",
+  "run-speed",
+  "heal-50",
+  "damage-up",
+];
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
@@ -73,6 +82,7 @@ function makeRoom(code, hostSocket) {
     guestReady: false,
     hostChoice: null,
     guestChoice: null,
+    pauseCards: [],
     snapshot: null,
     gameStarted: false,
     players: {
@@ -99,6 +109,14 @@ function makeRoom(code, hostSocket) {
         updatedAt: Date.now(),
       },
     },
+    playerUpgrades: {
+      host: {
+        extraLives: 0,
+      },
+      guest: {
+        extraLives: 0,
+      },
+    },
     zombies: [],
     currentWave: 0,
     nextWaveAt: 0,
@@ -106,6 +124,79 @@ function makeRoom(code, hostSocket) {
     lastTickAt: Date.now(),
     gameOver: false,
   };
+}
+
+function pickPauseCards() {
+  const pool = [...COOP_UPGRADE_IDS];
+  for (let i = pool.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool.slice(0, 3);
+}
+
+function applyServerUpgrade(room, role, cardId) {
+  if (!room.players[role]) {
+    return;
+  }
+
+  if (cardId === "heal-50") {
+    room.players[role].health = Math.min(
+      PLAYER_MAX_HEALTH,
+      room.players[role].health + 50,
+    );
+    return;
+  }
+
+  if (cardId === "extra-life") {
+    room.playerUpgrades[role].extraLives += 1;
+  }
+}
+
+function resolvePause(room, now) {
+  const offered =
+    room.pauseCards.length > 0 ? room.pauseCards : pickPauseCards();
+  const fallback = offered[0] || COOP_UPGRADE_IDS[0];
+
+  const hostChoice = offered.includes(room.hostChoice)
+    ? room.hostChoice
+    : fallback;
+  const guestChoice = offered.includes(room.guestChoice)
+    ? room.guestChoice
+    : offered[1] || fallback;
+
+  applyServerUpgrade(room, "host", hostChoice);
+  applyServerUpgrade(room, "guest", guestChoice);
+
+  const waveToStart = room.pendingWave;
+  room.menuOpenAt = null;
+  room.menuDeadlineAt = null;
+  room.hostChoice = null;
+  room.guestChoice = null;
+  room.pauseCards = [];
+  room.pendingWave = 0;
+
+  broadcast(room, {
+    type: "pause_resolve",
+    hostChoice,
+    guestChoice,
+    resolvedAt: now,
+  });
+
+  send(room.hostSocket, {
+    type: "player_health",
+    role: "host",
+    health: room.players.host.health,
+  });
+  send(room.guestSocket, {
+    type: "player_health",
+    role: "guest",
+    health: room.players.guest.health,
+  });
+
+  if (waveToStart > 0) {
+    spawnWave(room, waveToStart);
+  }
 }
 
 function toFiniteNumber(value, fallback) {
@@ -249,8 +340,11 @@ function endRoomRound(room) {
   room.menuDeadlineAt = null;
   room.hostChoice = null;
   room.guestChoice = null;
+  room.pauseCards = [];
   room.players.host.health = PLAYER_MAX_HEALTH;
   room.players.guest.health = PLAYER_MAX_HEALTH;
+  room.playerUpgrades.host.extraLives = 0;
+  room.playerUpgrades.guest.extraLives = 0;
   room.lastTickAt = Date.now();
 }
 
@@ -291,6 +385,14 @@ function tickRoom(room, now) {
       victim.health = Math.max(0, victim.health - zombie.contactDamage);
       zombie.contactCooldownMs = 700;
 
+      if (
+        victim.health <= 0 &&
+        room.playerUpgrades[target.role].extraLives > 0
+      ) {
+        room.playerUpgrades[target.role].extraLives -= 1;
+        victim.health = PLAYER_MAX_HEALTH;
+      }
+
       broadcast(room, {
         type: "player_health",
         role: target.role,
@@ -322,10 +424,13 @@ function tickRoom(room, now) {
         room.menuDeadlineAt = now + PAUSE_TIMEOUT_MS;
         room.hostChoice = null;
         room.guestChoice = null;
+        room.pauseCards = pickPauseCards();
         broadcast(room, {
           type: "pause_open",
           deadlineMs: PAUSE_TIMEOUT_MS,
+          deadlineAt: room.menuDeadlineAt,
           nextWave,
+          cards: room.pauseCards,
         });
       } else {
         spawnWave(room, nextWave);
@@ -464,7 +569,10 @@ function attachSocketHandlers(ws) {
         room.menuDeadlineAt = null;
         room.hostChoice = null;
         room.guestChoice = null;
+        room.pauseCards = [];
         room.pendingWave = 0;
+        room.playerUpgrades.host.extraLives = 0;
+        room.playerUpgrades.guest.extraLives = 0;
         room.lastTickAt = Date.now();
         spawnWave(room, 1);
       }
@@ -483,6 +591,7 @@ function attachSocketHandlers(ws) {
       room.menuDeadlineAt = Date.now() + PAUSE_TIMEOUT_MS;
       room.hostChoice = null;
       room.guestChoice = null;
+      room.pauseCards = pickPauseCards();
       room.pendingWave = Math.max(
         room.pendingWave || 0,
         Number(message.nextWave) || room.currentWave + 1,
@@ -490,16 +599,23 @@ function attachSocketHandlers(ws) {
       broadcast(room, {
         type: "pause_open",
         deadlineMs: PAUSE_TIMEOUT_MS,
+        deadlineAt: room.menuDeadlineAt,
         nextWave: room.pendingWave || room.currentWave + 1,
+        cards: room.pauseCards,
       });
       return;
     }
 
     if (message.type === "pause_choice") {
+      const selectedChoice = String(message.choice || "");
+      const normalizedChoice = room.pauseCards.includes(selectedChoice)
+        ? selectedChoice
+        : null;
+
       if (ws.coopRole === "host") {
-        room.hostChoice = message.choice || null;
+        room.hostChoice = normalizedChoice;
       } else if (ws.coopRole === "guest") {
-        room.guestChoice = message.choice || null;
+        room.guestChoice = normalizedChoice;
       }
 
       broadcast(room, {
@@ -510,19 +626,7 @@ function attachSocketHandlers(ws) {
       });
 
       if (room.hostChoice && room.guestChoice) {
-        const waveToStart = room.pendingWave;
-        room.menuDeadlineAt = null;
-        room.menuOpenAt = null;
-        room.pendingWave = 0;
-        broadcast(room, {
-          type: "pause_resolve",
-          hostChoice: room.hostChoice,
-          guestChoice: room.guestChoice,
-          resolvedAt: Date.now(),
-        });
-        if (waveToStart > 0) {
-          spawnWave(room, waveToStart);
-        }
+        resolvePause(room, Date.now());
       }
       return;
     }
@@ -627,19 +731,11 @@ setInterval(() => {
       room.menuDeadlineAt &&
       now > room.menuDeadlineAt
     ) {
-      const waveToStart = room.pendingWave;
       broadcast(room, {
         type: "pause_timeout",
         roomCode: code,
       });
-      room.menuOpenAt = null;
-      room.menuDeadlineAt = null;
-      room.hostChoice = null;
-      room.guestChoice = null;
-      room.pendingWave = 0;
-      if (waveToStart > 0) {
-        spawnWave(room, waveToStart);
-      }
+      resolvePause(room, now);
     }
 
     if (now - room.createdAt > LOBBY_TIMEOUT_MS && !room.gameStarted) {

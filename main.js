@@ -688,7 +688,12 @@ function handleCoopMessage(message) {
     coopState.pauseDeadlineAt = Date.now() + (message.deadlineMs || 10_000);
     if (coopClient.getSocket()) {
       const nextWave = Number(message.nextWave) || currentWave + 1;
-      openUpgradeMenu(nextWave, true);
+      const networkCards = Array.isArray(message.cards) ? message.cards : null;
+      openUpgradeMenu(nextWave, true, networkCards);
+      if (message.deadlineAt) {
+        const remaining = Math.max(0, (message.deadlineAt - Date.now()) / 1000);
+        setCoopTimer(remaining);
+      }
     }
     return;
   }
@@ -711,6 +716,12 @@ function handleCoopMessage(message) {
     if (!coopState.pauseOpen && !upgradeMenuActive) {
       return;
     }
+
+    if (coopState.active) {
+      setCoopStatus("Temps ecoule. Resolution des boosts...");
+      return;
+    }
+
     resolveCoopPause(coopState.selectedCardId, null);
     setCoopStatus("Pause terminee par timeout.");
     return;
@@ -2360,6 +2371,9 @@ function renderUpgradeMenu(cards, waveIndex) {
       }
 
       if (coopState.active) {
+        if (coopState.selectedCardId) {
+          return;
+        }
         coopState.selectedCardId = card.id;
         setCoopStatus("Carte choisie. Attente de l'autre joueur...");
         coopClient.choosePauseCard(card.id);
@@ -2401,7 +2415,11 @@ function renderUpgradeMenu(cards, waveIndex) {
   }
 }
 
-function openUpgradeMenu(nextWaveIndex, fromNetwork = false) {
+function openUpgradeMenu(
+  nextWaveIndex,
+  fromNetwork = false,
+  networkCardIds = null,
+) {
   if (upgradeMenuActive) {
     return;
   }
@@ -2422,7 +2440,15 @@ function openUpgradeMenu(nextWaveIndex, fromNetwork = false) {
     coopClient.openPauseMenu();
   }
 
-  const cards = shuffleArray(upgradeCatalog).slice(0, 3);
+  let cards = networkCardIds
+    ? networkCardIds
+        .map((cardId) => upgradeCatalogById.get(cardId))
+        .filter(Boolean)
+    : shuffleArray(upgradeCatalog).slice(0, 3);
+
+  if (!cards || cards.length === 0) {
+    cards = shuffleArray(upgradeCatalog).slice(0, 3);
+  }
   renderUpgradeMenu(cards, currentWave);
   upgradeMenuEl.style.display = "flex";
   updateWaveHud();
