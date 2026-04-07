@@ -686,6 +686,7 @@ function handleCoopMessage(message) {
   if (message.type === "pause_open") {
     coopState.pauseOpen = true;
     coopState.pauseDeadlineAt = Date.now() + (message.deadlineMs || 10_000);
+    coopState.selectedCardId = null;
     if (coopClient.getSocket()) {
       const nextWave = Number(message.nextWave) || currentWave + 1;
       const networkCards = Array.isArray(message.cards) ? message.cards : null;
@@ -2425,6 +2426,7 @@ function openUpgradeMenu(
   }
 
   upgradeMenuActive = true;
+  coopState.selectedCardId = null;
   pendingWaveToStart = nextWaveIndex;
   nextWaveTimer = 0;
   leftMouseHeld = false;
@@ -2457,6 +2459,7 @@ function openUpgradeMenu(
 
 function closeUpgradeMenu() {
   upgradeMenuActive = false;
+  coopState.selectedCardId = null;
   pendingWaveToStart = 0;
   upgradeMenuEl.style.display = "none";
   updateWaveHud();

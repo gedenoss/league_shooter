@@ -307,6 +307,10 @@ function broadcastSnapshot(room) {
 }
 
 function applyZombieHit(room, zombieId, damage) {
+  if (isRoomPaused(room)) {
+    return;
+  }
+
   const zombie = room.zombies.find((item) => item.id === zombieId);
   if (!zombie) {
     return;
@@ -353,7 +357,7 @@ function tickRoom(room, now) {
     return;
   }
 
-  if (room.menuOpenAt && room.menuDeadlineAt) {
+  if (isRoomPaused(room)) {
     return;
   }
 
@@ -452,6 +456,10 @@ function send(socket, payload) {
   }
 
   socket.send(JSON.stringify(payload));
+}
+
+function isRoomPaused(room) {
+  return Boolean(room.menuOpenAt);
 }
 
 function broadcast(room, payload) {
@@ -651,6 +659,10 @@ function attachSocketHandlers(ws) {
     }
 
     if (message.type === "zombie_hit") {
+      if (isRoomPaused(room)) {
+        return;
+      }
+
       const zombieId = String(message.zombieId || "").trim();
       const damage = Math.max(0, Number(message.damage) || 0);
       if (!zombieId || damage <= 0) {
@@ -661,6 +673,10 @@ function attachSocketHandlers(ws) {
     }
 
     if (message.type === "shot") {
+      if (isRoomPaused(room)) {
+        return;
+      }
+
       if (ws.coopRole === "guest") {
         send(room.hostSocket, {
           type: "shot",
