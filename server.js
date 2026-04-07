@@ -1,16 +1,19 @@
 const { WebSocketServer } = require("ws");
+const gameCoreConfig = require("./game-core-config.json");
 
 const PORT = Number(process.env.PORT || 8080);
 const LOBBY_TIMEOUT_MS = 120_000;
-const PAUSE_TIMEOUT_MS = 10_000;
+const PAUSE_TIMEOUT_MS = Number(gameCoreConfig.coop.pauseTimeoutMs || 10_000);
 const ROOM_CODE_LENGTH = 6;
 const PLAYER_MAX_HEALTH = 100;
 const SNAPSHOT_TICK_MS = 80;
 const WAVE_CLEAR_DELAY_MS = 1500;
-const ZOMBIE_PLAYER_MIN_SEPARATION = 0.78;
-const ZOMBIE_BASE_SPEED = 2.05;
-const ZOMBIE_SPEED_PER_WAVE = 0.12;
-const ZOMBIE_SPECIAL_CHANCE = 0.2;
+const SHARED_ZOMBIE = gameCoreConfig.zombie;
+const SHARED_ZOMBIE_VARIANTS = SHARED_ZOMBIE.variants;
+const ZOMBIE_PLAYER_MIN_SEPARATION = SHARED_ZOMBIE.playerMinSeparation;
+const ZOMBIE_BASE_SPEED = SHARED_ZOMBIE.baseSpeed;
+const ZOMBIE_SPEED_PER_WAVE = SHARED_ZOMBIE.speedPerWave;
+const ZOMBIE_SPECIAL_CHANCE = SHARED_ZOMBIE.specialChanceBase;
 
 const rooms = new Map();
 const sockets = new Map();
@@ -20,35 +23,37 @@ let nextZombieId = 1;
 const ZOMBIE_VARIANTS = [
   {
     key: "base",
-    health: 5,
-    damage: 9,
-    contactRange: 1.1,
-    speedMultiplier: 1,
+    health: SHARED_ZOMBIE_VARIANTS.base.health,
+    damage: SHARED_ZOMBIE_VARIANTS.base.damage,
+    contactRange: SHARED_ZOMBIE_VARIANTS.base.contactRange,
+    speedMultiplier: SHARED_ZOMBIE_VARIANTS.base.speedMultiplier,
   },
   {
     key: "dog",
-    health: 2.8,
-    damage: 3.5,
-    contactRange: 0.92,
-    speedMultiplier: 2.2,
+    health: SHARED_ZOMBIE_VARIANTS.dog.health,
+    damage: SHARED_ZOMBIE_VARIANTS.dog.damage,
+    contactRange: SHARED_ZOMBIE_VARIANTS.dog.contactRange,
+    speedMultiplier: SHARED_ZOMBIE_VARIANTS.dog.speedMultiplier,
   },
   {
     key: "tank",
-    health: 15,
-    damage: 11,
-    contactRange: 1.28,
-    speedMultiplier: 0.52,
+    health: SHARED_ZOMBIE_VARIANTS.tank.health,
+    damage: SHARED_ZOMBIE_VARIANTS.tank.damage,
+    contactRange: SHARED_ZOMBIE_VARIANTS.tank.contactRange,
+    speedMultiplier: SHARED_ZOMBIE_VARIANTS.tank.speedMultiplier,
   },
 ];
 
-const COOP_UPGRADE_IDS = [
-  "attack-speed",
-  "double-jump",
-  "extra-life",
-  "run-speed",
-  "heal-50",
-  "damage-up",
-];
+const COOP_UPGRADE_IDS = Array.isArray(gameCoreConfig.coop.upgradeIds)
+  ? gameCoreConfig.coop.upgradeIds
+  : [
+      "attack-speed",
+      "double-jump",
+      "extra-life",
+      "run-speed",
+      "heal-50",
+      "damage-up",
+    ];
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));

@@ -25,6 +25,7 @@ import {
 } from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { createCoopClient } from "./coop-network.js";
+import gameCoreConfig from "./game-core-config.json";
 
 console.log("Le jeu démarre !");
 
@@ -1267,14 +1268,16 @@ const WAVE_PANEL_HEIGHT = 0.16;
 const WAVE_PANEL_DISTANCE = 1.08;
 
 const PLAYER_MAX_HEALTH = 100;
-const ZOMBIE_HP = 5;
-const ZOMBIE_DAMAGE = 9;
-const ZOMBIE_CONTACT_RANGE = 1.1;
-const ZOMBIE_CONTACT_COOLDOWN = 0.55;
-const ZOMBIE_PLAYER_MIN_SEPARATION = 0.78;
-const ZOMBIE_BASE_SPEED = 2.05;
-const ZOMBIE_SPEED_PER_WAVE = 0.12;
-const ZOMBIE_SPECIAL_CHANCE = 0.2;
+const SHARED_ZOMBIE = gameCoreConfig.zombie;
+const SHARED_ZOMBIE_VARIANTS = SHARED_ZOMBIE.variants;
+const ZOMBIE_HP = SHARED_ZOMBIE_VARIANTS.base.health;
+const ZOMBIE_DAMAGE = SHARED_ZOMBIE_VARIANTS.base.damage;
+const ZOMBIE_CONTACT_RANGE = SHARED_ZOMBIE_VARIANTS.base.contactRange;
+const ZOMBIE_CONTACT_COOLDOWN = SHARED_ZOMBIE.contactCooldownSeconds;
+const ZOMBIE_PLAYER_MIN_SEPARATION = SHARED_ZOMBIE.playerMinSeparation;
+const ZOMBIE_BASE_SPEED = SHARED_ZOMBIE.baseSpeed;
+const ZOMBIE_SPEED_PER_WAVE = SHARED_ZOMBIE.speedPerWave;
+const ZOMBIE_SPECIAL_CHANCE = SHARED_ZOMBIE.specialChanceBase;
 const WAVE_CLEAR_DELAY = 1.35;
 const GAME_OVER_DELAY = 2.2;
 const FLOOR_Y = 0;
@@ -1291,10 +1294,10 @@ const ZOMBIE_VARIANTS = {
     headOffsetY: 0.73,
     legHeight: 0.58,
     legOffsetY: -0.8,
-    health: ZOMBIE_HP,
-    damage: ZOMBIE_DAMAGE,
-    contactRange: ZOMBIE_CONTACT_RANGE,
-    speedMultiplier: 1,
+    health: SHARED_ZOMBIE_VARIANTS.base.health,
+    damage: SHARED_ZOMBIE_VARIANTS.base.damage,
+    contactRange: SHARED_ZOMBIE_VARIANTS.base.contactRange,
+    speedMultiplier: SHARED_ZOMBIE_VARIANTS.base.speedMultiplier,
     bodyColor: 0x4ea35d,
     headColor: 0x6bb878,
     legColor: 0x355c3f,
@@ -1308,10 +1311,10 @@ const ZOMBIE_VARIANTS = {
     headOffsetY: 0.18,
     legHeight: 0.2,
     legOffsetY: -0.3,
-    health: 2.8,
-    damage: 3.5,
-    contactRange: 0.92,
-    speedMultiplier: 2.2,
+    health: SHARED_ZOMBIE_VARIANTS.dog.health,
+    damage: SHARED_ZOMBIE_VARIANTS.dog.damage,
+    contactRange: SHARED_ZOMBIE_VARIANTS.dog.contactRange,
+    speedMultiplier: SHARED_ZOMBIE_VARIANTS.dog.speedMultiplier,
     bodyColor: 0x6f7a46,
     headColor: 0x93a15e,
     legColor: 0x3e4727,
@@ -1325,10 +1328,10 @@ const ZOMBIE_VARIANTS = {
     headOffsetY: 0.95,
     legHeight: 0.74,
     legOffsetY: -1.07,
-    health: 15,
-    damage: 11,
-    contactRange: 1.28,
-    speedMultiplier: 0.52,
+    health: SHARED_ZOMBIE_VARIANTS.tank.health,
+    damage: SHARED_ZOMBIE_VARIANTS.tank.damage,
+    contactRange: SHARED_ZOMBIE_VARIANTS.tank.contactRange,
+    speedMultiplier: SHARED_ZOMBIE_VARIANTS.tank.speedMultiplier,
     bodyColor: 0x3f8051,
     headColor: 0x5f9f70,
     legColor: 0x2d5738,

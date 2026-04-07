@@ -1,0 +1,40 @@
+{
+  "zombie": {
+    "baseSpeed": 2.05,
+    "speedPerWave": 0.12,
+    "specialChanceBase": 0.2,
+    "contactCooldownSeconds": 0.55,
+    "playerMinSeparation": 0.78,
+    "variants": {
+      "base": {
+        "health": 5,
+        "damage": 9,
+        "contactRange": 1.1,
+        "speedMultiplier": 1
+      },
+      "dog": {
+        "health": 2.8,
+        "damage": 3.5,
+        "contactRange": 0.92,
+        "speedMultiplier": 2.2
+      },
+      "tank": {
+        "health": 15,
+        "damage": 11,
+        "contactRange": 1.28,
+        "speedMultiplier": 0.52
+      }
+    }
+  },
+  "coop": {
+    "pauseTimeoutMs": 10000,
+    "upgradeIds": [
+      "attack-speed",
+      "double-jump",
+      "extra-life",
+      "run-speed",
+      "heal-50",
+      "damage-up"
+    ]
+  }
+}
