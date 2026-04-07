@@ -1,0 +1,276 @@
+const { WebSocketServer } = require("ws");
+
+const PORT = Number(process.env.PORT || 8080);
+const MAX_ROOM_AGE_MS = 10_000;
+const ROOM_CODE_LENGTH = 6;
+
+const rooms = new Map();
+const sockets = new Map();
+let nextSocketId = 1;
+
+function createRoomCode() {
+  for (let attempt = 0; attempt < 1000; attempt += 1) {
+    const code = Array.from({ length: ROOM_CODE_LENGTH }, () =>
+      Math.floor(Math.random() * 10),
+    ).join("");
+    if (!rooms.has(code)) {
+      return code;
+    }
+  }
+
+  throw new Error("Unable to generate room code");
+}
+
+function makeRoom(code, hostSocket) {
+  return {
+    code,
+    hostSocket,
+    guestSocket: null,
+    createdAt: Date.now(),
+    menuOpenAt: null,
+    menuDeadlineAt: null,
+    hostReady: false,
+    guestReady: false,
+    hostChoice: null,
+    guestChoice: null,
+    snapshot: null,
+    gameStarted: false,
+  };
+}
+
+function getSocketId(socket) {
+  if (!sockets.has(socket)) {
+    sockets.set(socket, `s${nextSocketId++}`);
+  }
+  return sockets.get(socket);
+}
+
+function send(socket, payload) {
+  if (!socket || socket.readyState !== 1) {
+    return;
+  }
+
+  socket.send(JSON.stringify(payload));
+}
+
+function broadcast(room, payload) {
+  send(room.hostSocket, payload);
+  send(room.guestSocket, payload);
+}
+
+function closeRoom(room, reason = "room_closed") {
+  broadcast(room, { type: "room_closed", reason });
+  rooms.delete(room.code);
+}
+
+function attachSocketHandlers(ws) {
+  ws.on("message", (raw) => {
+    let message;
+    try {
+      message = JSON.parse(raw.toString("utf8"));
+    } catch {
+      return;
+    }
+
+    if (!message || typeof message.type !== "string") {
+      return;
+    }
+
+    if (message.type === "host_room") {
+      const code = createRoomCode();
+      const room = makeRoom(code, ws);
+      rooms.set(code, room);
+      ws.coopRole = "host";
+      ws.roomCode = code;
+      send(ws, {
+        type: "room_created",
+        code,
+        socketId: getSocketId(ws),
+        deadlineMs: MAX_ROOM_AGE_MS,
+      });
+      return;
+    }
+
+    if (message.type === "join_room") {
+      const code = String(message.code || "").trim();
+      const room = rooms.get(code);
+      if (!room || room.guestSocket || room.hostSocket.readyState !== 1) {
+        send(ws, { type: "room_error", error: "ROOM_NOT_AVAILABLE" });
+        return;
+      }
+
+      room.guestSocket = ws;
+      room.menuOpenAt = Date.now();
+      room.menuDeadlineAt = Date.now() + MAX_ROOM_AGE_MS;
+      ws.coopRole = "guest";
+      ws.roomCode = code;
+      ws.coopReady = false;
+      room.hostReady = false;
+      room.guestReady = false;
+      room.hostChoice = null;
+      room.guestChoice = null;
+      send(ws, {
+        type: "room_joined",
+        code,
+        socketId: getSocketId(ws),
+        role: "guest",
+        deadlineMs: MAX_ROOM_AGE_MS,
+      });
+      send(room.hostSocket, {
+        type: "guest_joined",
+        code,
+        socketId: getSocketId(ws),
+      });
+      return;
+    }
+
+    const code = ws.roomCode;
+    if (!code) {
+      return;
+    }
+
+    const room = rooms.get(code);
+    if (!room) {
+      return;
+    }
+
+    if (message.type === "lobby_ready") {
+      if (ws.coopRole === "host") {
+        room.hostReady = true;
+      } else if (ws.coopRole === "guest") {
+        room.guestReady = true;
+      }
+
+      if (room.hostReady && room.guestReady && !room.gameStarted) {
+        room.gameStarted = true;
+        const startAt = Date.now() + 350;
+        broadcast(room, {
+          type: "game_start",
+          startAt,
+          roomCode: room.code,
+        });
+      }
+      return;
+    }
+
+    if (message.type === "pause_open") {
+      room.menuOpenAt = Date.now();
+      room.menuDeadlineAt = Date.now() + MAX_ROOM_AGE_MS;
+      room.hostChoice = null;
+      room.guestChoice = null;
+      broadcast(room, {
+        type: "pause_open",
+        deadlineMs: MAX_ROOM_AGE_MS,
+      });
+      return;
+    }
+
+    if (message.type === "pause_choice") {
+      if (ws.coopRole === "host") {
+        room.hostChoice = message.choice || null;
+      } else if (ws.coopRole === "guest") {
+        room.guestChoice = message.choice || null;
+      }
+
+      broadcast(room, {
+        type: "pause_progress",
+        hostChoice: room.hostChoice,
+        guestChoice: room.guestChoice,
+        deadlineAt: room.menuDeadlineAt,
+      });
+
+      if (room.hostChoice && room.guestChoice) {
+        broadcast(room, {
+          type: "pause_resolve",
+          hostChoice: room.hostChoice,
+          guestChoice: room.guestChoice,
+          resolvedAt: Date.now(),
+        });
+      }
+      return;
+    }
+
+    if (message.type === "snapshot") {
+      room.snapshot = {
+        ...message.snapshot,
+        from: ws.coopRole,
+        at: Date.now(),
+      };
+      if (ws.coopRole === "host") {
+        send(room.guestSocket, { type: "snapshot", snapshot: room.snapshot });
+      } else {
+        send(room.hostSocket, { type: "guest_state", snapshot: room.snapshot });
+      }
+      return;
+    }
+
+    if (message.type === "shot") {
+      if (ws.coopRole === "guest") {
+        send(room.hostSocket, {
+          type: "shot",
+          shot: message.shot,
+        });
+      } else {
+        send(room.guestSocket, {
+          type: "shot",
+          shot: message.shot,
+        });
+      }
+      return;
+    }
+
+    if (message.type === "disconnect_room") {
+      closeRoom(room, "player_left");
+    }
+  });
+
+  ws.on("close", () => {
+    const code = ws.roomCode;
+    if (!code) {
+      return;
+    }
+
+    const room = rooms.get(code);
+    if (!room) {
+      return;
+    }
+
+    if (room.hostSocket === ws || room.guestSocket === ws) {
+      closeRoom(room, "player_left");
+    }
+  });
+}
+
+const wss = new WebSocketServer({ port: PORT });
+
+wss.on("connection", (ws) => {
+  getSocketId(ws);
+  attachSocketHandlers(ws);
+  send(ws, { type: "hello", socketId: getSocketId(ws) });
+});
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [code, room] of rooms.entries()) {
+    if (room.menuDeadlineAt && now > room.menuDeadlineAt && !room.gameStarted) {
+      broadcast(room, {
+        type: "pause_timeout",
+        roomCode: code,
+      });
+      room.menuDeadlineAt = null;
+    }
+
+    if (now - room.createdAt > MAX_ROOM_AGE_MS * 12 && !room.gameStarted) {
+      closeRoom(room, "timeout");
+    }
+  }
+}, 1000);
+
+wss.on("error", (error) => {
+  console.error("WebSocket Server Error:", error);
+});
+
+const host = process.env.HOST || "0.0.0.0";
+console.log(`✓ Coop server listening on ${host}:${PORT}`);
+console.log(`  Environment: ${process.env.NODE_ENV || "development"}`);
+console.log(`  Rooms: ${rooms.size}, Connections: ${wss.clients.size}`);

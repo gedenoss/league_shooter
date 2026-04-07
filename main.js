@@ -24,6 +24,7 @@ import {
   SRGBColorSpace,
 } from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { createCoopClient } from "./coop-network.js";
 
 console.log("Le jeu démarre !");
 
@@ -198,6 +199,87 @@ upgradeMenuEl.innerHTML = `
 document.body.appendChild(upgradeMenuEl);
 const upgradeCardGridEl = upgradeMenuEl.querySelector("#upgrade-card-grid");
 
+const coopMenuEl = document.createElement("div");
+coopMenuEl.style.position = "fixed";
+coopMenuEl.style.inset = "0";
+coopMenuEl.style.display = "none";
+coopMenuEl.style.alignItems = "center";
+coopMenuEl.style.justifyContent = "center";
+coopMenuEl.style.zIndex = "60";
+coopMenuEl.style.background = "rgba(8, 10, 14, 0.9)";
+coopMenuEl.style.pointerEvents = "auto";
+coopMenuEl.style.userSelect = "none";
+coopMenuEl.innerHTML = `
+  <div style="
+    width:min(920px, calc(100vw - 28px));
+    padding:18px 16px 16px;
+    border-radius:12px;
+    background:#111418;
+    border:1px solid #3a3f46;
+    box-shadow:0 14px 28px rgba(0,0,0,0.35);
+    color:#f1f1f1;
+    text-align:center;
+    font-family:system-ui, sans-serif;">
+    <div style="font:700 16px/1 monospace; letter-spacing:1px; color:#d7d7d7; margin-bottom:8px;">CO-OP</div>
+    <div style="font:700 28px/1.05 monospace; letter-spacing:0.5px; margin-bottom:8px;">HEBERGER OU REJOINDRE</div>
+    <div style="font:400 13px/1.4 monospace; color:#b8bcc2; margin-bottom:16px;">Un code a 6 chiffres permet de synchroniser la partie et les pauses.</div>
+    <div id="coop-status" style="font:700 14px/1.2 monospace; color:#8fd2ff; margin-bottom:14px;">En attente...</div>
+    <div id="coop-code-row" style="display:none; margin-bottom:14px; font:700 26px/1 monospace; letter-spacing:4px; color:#fff;"></div>
+    <div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; margin-bottom:12px;">
+      <button id="coop-host-btn" type="button" style="padding:14px 16px; border:1px solid #58789a; border-radius:8px; background:#17314a; color:#fff; font:700 16px/1 monospace; cursor:pointer;">HEBERGER</button>
+      <button id="coop-join-btn" type="button" style="padding:14px 16px; border:1px solid #6b7b8b; border-radius:8px; background:#1a1d22; color:#fff; font:700 16px/1 monospace; cursor:pointer;">REJOINDRE</button>
+    </div>
+    <div style="display:grid; grid-template-columns:1fr auto; gap:10px; align-items:center; margin-bottom:14px;">
+      <input id="coop-code-input" maxlength="6" inputmode="numeric" placeholder="ENTRER LE CODE" style="width:100%; padding:14px 16px; border-radius:8px; border:1px solid #4a4f57; background:#1a1d22; color:#fff; font:700 18px/1 monospace; letter-spacing:4px; text-transform:uppercase;" />
+      <button id="coop-back-btn" type="button" style="padding:14px 16px; border:1px solid #4a4f57; border-radius:8px; background:#111418; color:#fff; font:700 14px/1 monospace; cursor:pointer;">FERMER</button>
+    </div>
+    <div id="coop-timer" style="font:700 12px/1 monospace; letter-spacing:1.2px; color:#b6bcc7;">10.0s max</div>
+  </div>
+`;
+document.body.appendChild(coopMenuEl);
+const coopStatusEl = coopMenuEl.querySelector("#coop-status");
+const coopCodeRowEl = coopMenuEl.querySelector("#coop-code-row");
+const coopHostBtnEl = coopMenuEl.querySelector("#coop-host-btn");
+const coopJoinBtnEl = coopMenuEl.querySelector("#coop-join-btn");
+const coopCodeInputEl = coopMenuEl.querySelector("#coop-code-input");
+const coopBackBtnEl = coopMenuEl.querySelector("#coop-back-btn");
+const coopTimerEl = coopMenuEl.querySelector("#coop-timer");
+
+if (coopHostBtnEl) {
+  coopHostBtnEl.addEventListener("click", () => {
+    coopClient.hostRoom();
+    setCoopStatus("Generation du code de partie...");
+  });
+}
+
+if (coopJoinBtnEl) {
+  coopJoinBtnEl.addEventListener("click", () => {
+    const code = String(coopCodeInputEl?.value || "")
+      .replace(/\D/g, "")
+      .slice(0, 6);
+    if (code.length !== 6) {
+      setCoopStatus("Entre un code a 6 chiffres.");
+      return;
+    }
+    coopClient.joinRoom(code);
+    setCoopStatus(`Connexion au code ${code}...`);
+  });
+}
+
+if (coopCodeInputEl) {
+  coopCodeInputEl.addEventListener("input", () => {
+    coopCodeInputEl.value = coopCodeInputEl.value
+      .replace(/\D/g, "")
+      .slice(0, 6);
+  });
+}
+
+if (coopBackBtnEl) {
+  coopBackBtnEl.addEventListener("click", () => {
+    closeCoopMenu();
+  });
+}
+
 function makePatternTexture(width, height, drawFn) {
   const canvas = document.createElement("canvas");
   canvas.width = width;
@@ -230,6 +312,186 @@ function applyTextureRepeat(texture, repeatX = 1, repeatY = 1) {
   repeatedTexture.repeat.set(repeatX, repeatY);
   repeatedTexture.needsUpdate = true;
   return repeatedTexture;
+}
+
+function setCoopStatus(message) {
+  if (coopStatusEl) {
+    coopStatusEl.textContent = message;
+  }
+}
+
+function setCoopCode(code) {
+  if (coopCodeRowEl) {
+    coopCodeRowEl.style.display = code ? "block" : "none";
+    coopCodeRowEl.textContent = code ? code.split("").join(" ") : "";
+  }
+}
+
+function setCoopTimer(seconds) {
+  if (coopTimerEl) {
+    coopTimerEl.textContent = `${seconds.toFixed(1)}s max`;
+  }
+}
+
+function showCoopMenu() {
+  if (coopMenuEl) {
+    coopMenuEl.style.display = "flex";
+  }
+}
+
+function hideCoopMenu() {
+  if (coopMenuEl) {
+    coopMenuEl.style.display = "none";
+  }
+}
+
+function openCoopMenu() {
+  coopClient.connect();
+  showCoopMenu();
+  setCoopStatus("Choisis heberger ou rejoindre.");
+  setCoopCode("");
+  setCoopTimer(10);
+}
+
+function closeCoopMenu() {
+  hideCoopMenu();
+}
+
+function enableCoopMode(role, roomCode) {
+  coopState.active = true;
+  coopState.role = role;
+  coopState.roomCode = roomCode || coopState.roomCode;
+  setCoopStatus(
+    role === "host" ? "Partie coop hebergee." : "Partie coop rejointe.",
+  );
+  setCoopCode(coopState.roomCode);
+  closeCoopMenu();
+  resetRun();
+  coopState.selectedCardId = null;
+  coopState.pauseOpen = false;
+  coopState.lastSentAt = 0;
+  zombieModeActive = true;
+  updateModeButtonVisual("disabled");
+  updateCoopButtonVisual("active");
+  startWave(1);
+}
+
+function handleCoopMessage(message) {
+  if (!message || typeof message.type !== "string") {
+    return;
+  }
+
+  if (message.type === "hello") {
+    return;
+  }
+
+  if (message.type === "room_created") {
+    coopState.roomCode = message.code;
+    coopState.role = "host";
+    coopState.waitingForGuest = true;
+    setCoopStatus("Code genere. En attente d'un autre joueur.");
+    setCoopCode(message.code);
+    if (coopHostBtnEl) {
+      coopHostBtnEl.disabled = true;
+    }
+    if (coopJoinBtnEl) {
+      coopJoinBtnEl.disabled = true;
+    }
+    coopClient.lobbyReady();
+    return;
+  }
+
+  if (message.type === "room_joined") {
+    coopState.roomCode = message.code;
+    coopState.role = "guest";
+    setCoopStatus("Rejoint. En attente de l'hebergeur.");
+    setCoopCode(message.code);
+    coopClient.lobbyReady();
+    return;
+  }
+
+  if (message.type === "guest_joined") {
+    setCoopStatus("Le second joueur est arrive. Synchronisation...");
+    return;
+  }
+
+  if (message.type === "game_start") {
+    coopState.pendingStartAt = message.startAt || Date.now();
+    enableCoopMode(
+      coopState.role || "host",
+      message.roomCode || coopState.roomCode,
+    );
+    return;
+  }
+
+  if (message.type === "snapshot") {
+    if (coopState.role === "guest") {
+      applyCoopSnapshot(message.snapshot);
+    }
+    return;
+  }
+
+  if (message.type === "guest_state") {
+    if (coopState.role === "host") {
+      updateRemotePlayerProxy(message.snapshot?.player);
+    }
+    return;
+  }
+
+  if (message.type === "pause_open") {
+    coopState.pauseOpen = true;
+    coopState.pauseDeadlineAt = Date.now() + (message.deadlineMs || 10_000);
+    if (coopClient.getSocket()) {
+      openUpgradeMenu(currentWave || 1, true);
+    }
+    return;
+  }
+
+  if (message.type === "pause_progress") {
+    if (coopTimerEl && message.deadlineAt) {
+      const remaining = Math.max(0, (message.deadlineAt - Date.now()) / 1000);
+      setCoopTimer(remaining);
+    }
+    return;
+  }
+
+  if (message.type === "pause_resolve") {
+    resolveCoopPause(message.hostChoice, message.guestChoice);
+    setCoopStatus("Pauses synchronisees. Reprise.");
+    return;
+  }
+
+  if (message.type === "pause_timeout") {
+    resolveCoopPause(coopState.selectedCardId, null);
+    setCoopStatus("Pause terminee par timeout.");
+    return;
+  }
+
+  if (message.type === "shot" && coopState.role === "host") {
+    applyRemoteShot(message.shot);
+    return;
+  }
+
+  if (message.type === "room_error") {
+    setCoopStatus("Code invalide ou partie indisponible.");
+    return;
+  }
+
+  if (message.type === "room_closed") {
+    coopState.active = false;
+    coopState.role = null;
+    coopState.roomCode = "";
+    setCoopStatus("Connexion coupee.");
+    setCoopCode("");
+    if (coopHostBtnEl) {
+      coopHostBtnEl.disabled = false;
+    }
+    if (coopJoinBtnEl) {
+      coopJoinBtnEl.disabled = false;
+    }
+    updateCoopButtonVisual("ready");
+    return;
+  }
 }
 
 function makeConcreteTexture() {
@@ -476,6 +738,20 @@ scene.add(player);
 player.add(camera);
 camera.position.set(0, 0, 0);
 
+const remotePlayerProxy = new Mesh(
+  new BoxGeometry(0.65, 1.6, 0.65),
+  new MeshStandardMaterial({
+    color: 0x7bb5ff,
+    roughness: 0.75,
+    metalness: 0.02,
+    emissive: 0x10233c,
+    emissiveIntensity: 0.2,
+  }),
+);
+remotePlayerProxy.position.set(0, -1000, 0);
+remotePlayerProxy.visible = false;
+scene.add(remotePlayerProxy);
+
 const GUN_HOLDER_BASE = { x: 0.13, y: -0.19, z: -0.42 };
 const gunHolder = new Object3D();
 gunHolder.position.set(GUN_HOLDER_BASE.x, GUN_HOLDER_BASE.y, GUN_HOLDER_BASE.z);
@@ -671,7 +947,9 @@ const ZOMBIE_VARIANTS = {
 };
 
 let modeButtonMesh = null;
+let coopButtonMesh = null;
 let modeButtonState = "ready";
+let coopButtonState = "ready";
 let zombieModeActive = false;
 let currentWave = 0;
 let nextWaveTimer = 0;
@@ -756,6 +1034,9 @@ const upgradeCatalog = [
     },
   },
 ];
+const upgradeCatalogById = new Map(
+  upgradeCatalog.map((card) => [card.id, card]),
+);
 
 function getMaxJumpCharges() {
   return 1 + bonusJumpCharges;
@@ -957,6 +1238,70 @@ modeButtonMesh.material.emissiveIntensity = 1.25;
 modeButtonMesh.userData.isZombieModeButton = true;
 modeButtonMesh.userData.isDisabled = false;
 shootTargets.push(modeButtonMesh);
+
+coopButtonMesh = createBox(0.12, 1.25, 1.25, 16.32, 1.85, 0, 0x24435f, false, {
+  roughness: 0.45,
+  metalness: 0.08,
+});
+const coopButtonPlate = createBox(
+  0.06,
+  1.65,
+  1.65,
+  16.25,
+  1.85,
+  0,
+  0xebf1f7,
+  false,
+  {
+    roughness: 0.75,
+    metalness: 0.02,
+  },
+);
+const coopHeadsTexture = makePatternTexture(
+  512,
+  512,
+  (context, width, height) => {
+    context.clearRect(0, 0, width, height);
+    context.fillStyle = "rgba(0,0,0,0)";
+    context.fillRect(0, 0, width, height);
+
+    context.fillStyle = "#ffffff";
+    context.beginPath();
+    context.arc(width * 0.36, height * 0.42, width * 0.12, 0, Math.PI * 2);
+    context.arc(width * 0.64, height * 0.42, width * 0.12, 0, Math.PI * 2);
+    context.fill();
+    context.fillRect(width * 0.25, height * 0.55, width * 0.22, height * 0.12);
+    context.fillRect(width * 0.53, height * 0.55, width * 0.22, height * 0.12);
+
+    context.fillStyle = "#111111";
+    context.beginPath();
+    context.arc(width * 0.33, height * 0.4, width * 0.02, 0, Math.PI * 2);
+    context.arc(width * 0.39, height * 0.4, width * 0.02, 0, Math.PI * 2);
+    context.arc(width * 0.61, height * 0.4, width * 0.02, 0, Math.PI * 2);
+    context.arc(width * 0.67, height * 0.4, width * 0.02, 0, Math.PI * 2);
+    context.fill();
+  },
+);
+const coopHeadsMark = new Mesh(
+  new BoxGeometry(0.02, 0.52, 0.52),
+  new MeshBasicMaterial({
+    map: coopHeadsTexture,
+    transparent: true,
+    color: 0xffffff,
+  }),
+);
+coopHeadsMark.position.set(-0.065, 0.02, 0);
+coopButtonMesh.add(coopHeadsMark);
+coopButtonPlate.material.color.set(0xebf1f7);
+coopButtonPlate.material.emissive.set(0x1d2430);
+coopButtonPlate.material.emissiveIntensity = 0.18;
+coopButtonMesh.material.color.set(0x24435f);
+coopButtonMesh.position.set(16.32, 1.85, 0);
+coopButtonMesh.material.emissive.set(0x12263a);
+coopButtonMesh.material.emissiveIntensity = 1.1;
+coopButtonMesh.userData.isCoopModeButton = true;
+coopButtonMesh.userData.isDisabled = false;
+shootTargets.push(coopButtonMesh);
 initWavePanelInScene();
 
 const clock = new Clock();
@@ -1008,6 +1353,54 @@ const HEADSHOT_BELL_VOLUME = 0.22;
 const HEADSHOT_MULTIPLIER = 2.5;
 let nextZombieSoundAt = 0;
 let damageOverlayTimeout = null;
+
+const coopState = {
+  active: false,
+  role: null,
+  roomCode: "",
+  connected: false,
+  lobbyOpen: false,
+  waitingForGuest: false,
+  pauseOpen: false,
+  pauseDeadlineAt: 0,
+  selectedCardId: null,
+  remotePlayer: {
+    x: 0,
+    y: groundY,
+    z: 0,
+    yaw: 0,
+    pitch: 0,
+    health: 100,
+    ammo: 30,
+  },
+  lastSnapshotAt: 0,
+  lastSentAt: 0,
+  pendingStartAt: 0,
+  hostSeed: 0,
+};
+
+const coopClient = createCoopClient({
+  url:
+    import.meta.env.VITE_COOP_SERVER_URL ||
+    `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.hostname || "localhost"}:8080`,
+  onOpen() {
+    setCoopStatus("Connecte au serveur coop.");
+    coopState.connected = true;
+  },
+  onClose() {
+    coopState.connected = false;
+    coopState.active = false;
+    coopState.role = null;
+    setCoopStatus("Connexion coop fermee.");
+    hideCoopMenu();
+  },
+  onError() {
+    setCoopStatus("Erreur de connexion coop.");
+  },
+  onMessage(message) {
+    handleCoopMessage(message);
+  },
+});
 
 function ensureAudioContext() {
   if (audioContext) {
@@ -1333,6 +1726,132 @@ function updateWaveHud() {
   wavePanelTexture.needsUpdate = true;
 }
 
+function getZombieSnapshot() {
+  return zombies.map((zombie) => ({
+    id: zombie.networkId || zombie.mesh.uuid,
+    x: zombie.mesh.position.x,
+    y: zombie.mesh.position.y,
+    z: zombie.mesh.position.z,
+    health: zombie.health,
+    variant: zombie.variant,
+    contactCooldown: zombie.contactCooldown,
+  }));
+}
+
+function getPlayerSnapshot() {
+  return {
+    x: player.position.x,
+    y: player.position.y,
+    z: player.position.z,
+    yaw,
+    pitch,
+    health: playerHealth,
+    ammo: ammoInMagazine,
+    isReloading,
+  };
+}
+
+function updateRemotePlayerProxy(snapshot) {
+  if (!snapshot || !remotePlayerProxy) {
+    return;
+  }
+
+  remotePlayerProxy.visible = true;
+  remotePlayerProxy.position.set(snapshot.x, snapshot.y, snapshot.z);
+  remotePlayerProxy.rotation.y = snapshot.yaw || 0;
+}
+
+function upsertZombieFromSnapshot(zombieSnapshot) {
+  const networkId = zombieSnapshot.id;
+  let zombie = zombies.find((item) => item.networkId === networkId);
+
+  if (!zombie) {
+    zombie = createZombie(
+      new Vector3(zombieSnapshot.x, zombieSnapshot.y, zombieSnapshot.z),
+      Math.max(1, currentWave || 1),
+      {
+        networkId,
+        variant: zombieSnapshot.variant,
+        suppressSound: true,
+      },
+    );
+  }
+
+  zombie.mesh.position.set(
+    zombieSnapshot.x,
+    zombieSnapshot.y,
+    zombieSnapshot.z,
+  );
+  zombie.mesh.position.y = zombieSnapshot.y;
+  zombie.health = zombieSnapshot.health;
+  zombie.variant = zombieSnapshot.variant || zombie.variant;
+  zombie.contactCooldown = zombieSnapshot.contactCooldown || 0;
+}
+
+function applyCoopSnapshot(snapshot) {
+  if (!snapshot) {
+    return;
+  }
+
+  updateRemotePlayerProxy(snapshot.player);
+
+  if (coopState.role === "guest" && Array.isArray(snapshot.zombies)) {
+    for (const zombieSnapshot of snapshot.zombies) {
+      upsertZombieFromSnapshot(zombieSnapshot);
+    }
+
+    for (let i = zombies.length - 1; i >= 0; i -= 1) {
+      const zombie = zombies[i];
+      const hasRemote = snapshot.zombies.some(
+        (item) => item.id === zombie.networkId,
+      );
+      if (!hasRemote) {
+        removeZombie(zombie);
+      }
+    }
+  }
+
+  if (typeof snapshot.currentWave === "number") {
+    currentWave = snapshot.currentWave;
+  }
+
+  if (typeof snapshot.nextWaveTimer === "number") {
+    nextWaveTimer = snapshot.nextWaveTimer;
+  }
+
+  if (typeof snapshot.gameOverActive === "boolean") {
+    gameOverActive = snapshot.gameOverActive;
+  }
+
+  if (typeof snapshot.upgradeMenuActive === "boolean") {
+    upgradeMenuActive = snapshot.upgradeMenuActive;
+  }
+
+  updateWaveHud();
+}
+
+function sendCoopSnapshot() {
+  if (!coopState.active || !coopClient.isConnected()) {
+    return;
+  }
+
+  const now = Date.now();
+  if (now - coopState.lastSentAt < 90) {
+    return;
+  }
+
+  coopState.lastSentAt = now;
+  coopClient.sendSnapshot({
+    role: coopState.role,
+    player: getPlayerSnapshot(),
+    zombies: coopState.role === "host" ? getZombieSnapshot() : [],
+    currentWave,
+    nextWaveTimer,
+    gameOverActive,
+    upgradeMenuActive,
+  });
+}
+
 function renderUpgradeMenu(cards, waveIndex) {
   if (!upgradeCardGridEl) {
     return;
@@ -1386,6 +1905,15 @@ function renderUpgradeMenu(cards, waveIndex) {
         return;
       }
 
+      if (coopState.active) {
+        coopState.selectedCardId = card.id;
+        setCoopStatus("Carte choisie. Attente de l'autre joueur...");
+        coopClient.choosePauseCard(card.id);
+        button.style.borderColor = `rgb(${card.color[0]}, ${card.color[1]}, ${card.color[2]})`;
+        button.style.transform = "translateY(-1px)";
+        return;
+      }
+
       const waveToStart = pendingWaveToStart;
       card.apply();
       closeUpgradeMenu();
@@ -1419,7 +1947,7 @@ function renderUpgradeMenu(cards, waveIndex) {
   }
 }
 
-function openUpgradeMenu(nextWaveIndex) {
+function openUpgradeMenu(nextWaveIndex, fromNetwork = false) {
   if (upgradeMenuActive) {
     return;
   }
@@ -1434,10 +1962,17 @@ function openUpgradeMenu(nextWaveIndex) {
     document.exitPointerLock();
   }
 
+  if (coopState.active && coopState.role === "host" && !fromNetwork) {
+    coopState.pauseOpen = true;
+    coopState.pauseDeadlineAt = Date.now() + 10_000;
+    coopClient.openPauseMenu();
+  }
+
   const cards = shuffleArray(upgradeCatalog).slice(0, 3);
   renderUpgradeMenu(cards, currentWave);
   upgradeMenuEl.style.display = "flex";
   updateWaveHud();
+  setCoopTimer(10);
 }
 
 function closeUpgradeMenu() {
@@ -1445,6 +1980,37 @@ function closeUpgradeMenu() {
   pendingWaveToStart = 0;
   upgradeMenuEl.style.display = "none";
   updateWaveHud();
+}
+
+function applyUpgradeById(cardId) {
+  const card = upgradeCatalogById.get(cardId);
+  if (card) {
+    card.apply();
+  }
+}
+
+function resolveCoopPause(hostChoice, guestChoice) {
+  const choices = [hostChoice, guestChoice].filter(Boolean);
+  if (choices.length === 0) {
+    choices.push(upgradeCatalog[0].id);
+  }
+
+  const waveToStart = pendingWaveToStart;
+
+  for (const choice of choices) {
+    applyUpgradeById(choice);
+  }
+
+  coopState.pauseOpen = false;
+  coopState.selectedCardId = null;
+  closeUpgradeMenu();
+  updateAmmoHud();
+  updateHealthHud();
+  updateWaveHud();
+
+  if (waveToStart > 0) {
+    startWave(waveToStart);
+  }
 }
 
 function consumeExtraLife() {
@@ -1599,6 +2165,32 @@ function updateModeButtonVisual(active) {
   modeButtonMesh.material.needsUpdate = true;
 }
 
+function updateCoopButtonVisual(active) {
+  if (!coopButtonMesh) {
+    return;
+  }
+
+  coopButtonState =
+    active === true ? "active" : active === false ? "ready" : active;
+  coopButtonMesh.userData.isDisabled = coopButtonState === "disabled";
+
+  if (coopButtonState === "active") {
+    coopButtonMesh.material.color.set(0x4d8cff);
+    coopButtonMesh.material.emissive.set(0x18356c);
+    coopButtonMesh.material.emissiveIntensity = 0.95;
+  } else if (coopButtonState === "disabled") {
+    coopButtonMesh.material.color.set(0x4d4d4d);
+    coopButtonMesh.material.emissive.set(0x101010);
+    coopButtonMesh.material.emissiveIntensity = 0.18;
+  } else {
+    coopButtonMesh.material.color.set(0x24435f);
+    coopButtonMesh.material.emissive.set(0x12263a);
+    coopButtonMesh.material.emissiveIntensity = 0.85;
+  }
+
+  coopButtonMesh.material.needsUpdate = true;
+}
+
 function removeZombieFromTargets(zombieRef) {
   for (let i = shootTargets.length - 1; i >= 0; i -= 1) {
     if (shootTargets[i].userData?.zombieRef === zombieRef) {
@@ -1737,8 +2329,10 @@ function pickZombieVariant(waveIndex) {
   return Math.random() < 0.5 ? ZOMBIE_VARIANTS.dog : ZOMBIE_VARIANTS.tank;
 }
 
-function createZombie(spawnPosition, waveIndex) {
-  const variant = pickZombieVariant(waveIndex);
+function createZombie(spawnPosition, waveIndex, options = {}) {
+  const variant = options.variant
+    ? ZOMBIE_VARIANTS[options.variant] || ZOMBIE_VARIANTS.base
+    : pickZombieVariant(waveIndex);
   const zombieMaterial = new MeshStandardMaterial({
     color: variant.bodyColor,
     roughness: 1,
@@ -1796,6 +2390,8 @@ function createZombie(spawnPosition, waveIndex) {
   const waveSpeed = ZOMBIE_BASE_SPEED + (waveIndex - 1) * ZOMBIE_SPEED_PER_WAVE;
   const zombieState = {
     mesh: zombieMesh,
+    networkId:
+      options.networkId || `z-${Math.random().toString(36).slice(2, 10)}`,
     variant: variant.key,
     halfExtents: variant.halfExtents.clone(),
     centerY: variant.centerY,
@@ -1816,12 +2412,21 @@ function createZombie(spawnPosition, waveIndex) {
   head.userData.zombieRef = zombieState;
   zombies.push(zombieState);
 
-  playZombieSound(false);
+  if (!options.suppressSound) {
+    playZombieSound(false);
+  }
+
+  return zombieState;
 }
 
 function startWave(waveIndex) {
   currentWave = waveIndex;
   nextWaveTimer = 0;
+
+  if (coopState.active && coopState.role === "guest") {
+    updateWaveHud();
+    return;
+  }
 
   for (let i = 0; i < waveIndex; i += 1) {
     const initialSpawn = getZombieSpawnPosition(i, waveIndex);
@@ -2192,7 +2797,12 @@ function updateZombie(zombie, dt) {
 }
 
 function updateZombieWaves(dt) {
-  if (!zombieModeActive || gameOverActive || upgradeMenuActive) {
+  if (
+    !zombieModeActive ||
+    gameOverActive ||
+    upgradeMenuActive ||
+    (coopState.active && coopState.role === "guest")
+  ) {
     return;
   }
 
@@ -2217,7 +2827,11 @@ function updateZombieWaves(dt) {
 }
 
 function updateZombies(dt) {
-  if (!zombieModeActive || gameOverActive) {
+  if (
+    !zombieModeActive ||
+    gameOverActive ||
+    (coopState.active && coopState.role === "guest")
+  ) {
     return;
   }
 
@@ -2257,6 +2871,20 @@ function shoot(spreadX = 0, spreadY = 0) {
   origin.copy(raycaster.ray.origin);
   muzzleAnchor.getWorldPosition(muzzleWorld);
 
+  if (coopState.active && coopState.role === "guest") {
+    coopClient.sendShot({
+      origin: [origin.x, origin.y, origin.z],
+      direction: [
+        raycaster.ray.direction.x,
+        raycaster.ray.direction.y,
+        raycaster.ray.direction.z,
+      ],
+      spreadX,
+      spreadY,
+      player: getPlayerSnapshot(),
+    });
+  }
+
   const hits = raycaster.intersectObjects(shootTargets, false);
   if (hits.length > 0) {
     const hit = hits[0];
@@ -2264,6 +2892,8 @@ function shoot(spreadX = 0, spreadY = 0) {
 
     if (modeButtonState === "ready" && hitObject === modeButtonMesh) {
       activateZombieMode();
+    } else if (hitObject === coopButtonMesh) {
+      openCoopMenu();
     } else if (hitObject.userData?.zombieRef) {
       const zombieRef = hitObject.userData.zombieRef;
       if (zombieRef) {
@@ -2303,6 +2933,46 @@ function shoot(spreadX = 0, spreadY = 0) {
   setTimeout(() => {
     gunHolder.position.z = GUN_HOLDER_BASE.z;
   }, 50);
+}
+
+function applyRemoteShot(shot) {
+  if (!shot || !Array.isArray(shot.origin) || !Array.isArray(shot.direction)) {
+    return;
+  }
+
+  const shotOrigin = new Vector3(
+    shot.origin[0],
+    shot.origin[1],
+    shot.origin[2],
+  );
+  const shotDirection = new Vector3(
+    shot.direction[0],
+    shot.direction[1],
+    shot.direction[2],
+  ).normalize();
+  raycaster.ray.origin.copy(shotOrigin);
+  raycaster.ray.direction.copy(shotDirection);
+
+  const hits = raycaster.intersectObjects(shootTargets, false);
+  if (hits.length === 0) {
+    return;
+  }
+
+  const hit = hits[0];
+  if (hit.object?.userData?.zombieRef) {
+    const zombieRef = hit.object.userData.zombieRef;
+    spawnBloodBurst(
+      hit.point.clone(),
+      hit.face?.normal?.clone().transformDirection(hit.object.matrixWorld) ??
+        null,
+    );
+    zombieRef.health -= 1;
+    if (zombieRef.health <= 0) {
+      removeZombie(zombieRef);
+    } else {
+      updateWaveHud();
+    }
+  }
 }
 
 function startReload() {
@@ -2386,10 +3056,6 @@ document.addEventListener("keydown", (e) => {
 });
 
 document.addEventListener("keyup", (e) => {
-  if (upgradeMenuActive) {
-    return;
-  }
-
   if (e.code in pressed) {
     pressed[e.code] = false;
   }
@@ -2458,6 +3124,7 @@ function animate() {
   requestAnimationFrame(animate);
 
   const dt = Math.min(clock.getDelta(), 0.05);
+  updateAmmoHud();
 
   if (gameOverActive) {
     gameOverTimer -= dt;
@@ -2527,6 +3194,7 @@ function animate() {
   }
 
   updateShootingStars(dt);
+  sendCoopSnapshot();
 
   renderer.render(scene, camera);
 }
