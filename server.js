@@ -35,6 +35,8 @@ function makeRoom(code, hostSocket) {
     hostChoice: null,
     guestChoice: null,
     snapshot: null,
+    zombieHealth: new Map(),
+    deadZombieIds: new Set(),
     gameStarted: false,
   };
 }
@@ -106,7 +108,7 @@ function attachSocketHandlers(ws) {
       ws.coopRole = "guest";
       ws.roomCode = code;
       ws.coopReady = false;
-      room.hostReady = false;
+      // Keep host readiness if host already acknowledged lobby before guest joined.
       room.guestReady = false;
       room.hostChoice = null;
       room.guestChoice = null;
@@ -136,21 +138,31 @@ function attachSocketHandlers(ws) {
     }
 
     if (message.type === "lobby_ready") {
-      if (ws.coopRole === "host") {
-        room.hostReady = true;
-      } else if (ws.coopRole === "guest") {
-        room.guestReady = true;
+      // Kept for backward compatibility with older clients.
+      return;
+    }
+
+    if (message.type === "request_start") {
+      if (
+        !room.hostSocket ||
+        !room.guestSocket ||
+        room.hostSocket.readyState !== 1 ||
+        room.guestSocket.readyState !== 1
+      ) {
+        send(ws, { type: "start_error", error: "WAITING_FOR_PLAYER" });
+        return;
       }
 
-      if (room.hostReady && room.guestReady && !room.gameStarted) {
+      if (!room.gameStarted) {
         room.gameStarted = true;
-        const startAt = Date.now() + 350;
-        broadcast(room, {
-          type: "game_start",
-          startAt,
-          roomCode: room.code,
-        });
       }
+
+      const startAt = Date.now() + 250;
+      broadcast(room, {
+        type: "game_start",
+        startAt,
+        roomCode: room.code,
+      });
       return;
     }
 
@@ -193,8 +205,31 @@ function attachSocketHandlers(ws) {
     }
 
     if (message.type === "snapshot") {
+      const inputSnapshot = message.snapshot || {};
+      const zombies = Array.isArray(inputSnapshot.zombies)
+        ? inputSnapshot.zombies
+        : [];
+
+      const reconciledZombies = [];
+      for (const zombie of zombies) {
+        const id = zombie?.id;
+        if (!id || room.deadZombieIds.has(id)) {
+          continue;
+        }
+
+        const serverHealth = room.zombieHealth.get(id);
+        const clientHealth = Number(zombie.health);
+        const health = Number.isFinite(serverHealth)
+          ? Math.min(serverHealth, clientHealth)
+          : clientHealth;
+
+        room.zombieHealth.set(id, health);
+        reconciledZombies.push({ ...zombie, health });
+      }
+
       room.snapshot = {
-        ...message.snapshot,
+        ...inputSnapshot,
+        zombies: reconciledZombies,
         from: ws.coopRole,
         at: Date.now(),
       };
@@ -202,6 +237,37 @@ function attachSocketHandlers(ws) {
         send(room.guestSocket, { type: "snapshot", snapshot: room.snapshot });
       } else {
         send(room.hostSocket, { type: "guest_state", snapshot: room.snapshot });
+      }
+      return;
+    }
+
+    if (message.type === "zombie_hit") {
+      const zombieId = String(message.zombieId || "").trim();
+      const damage = Math.max(0, Number(message.damage) || 0);
+      if (!zombieId || damage <= 0 || room.deadZombieIds.has(zombieId)) {
+        return;
+      }
+
+      const currentHealth = Number(room.zombieHealth.get(zombieId));
+      if (!Number.isFinite(currentHealth)) {
+        return;
+      }
+
+      const nextHealth = currentHealth - damage;
+      if (nextHealth <= 0) {
+        room.deadZombieIds.add(zombieId);
+        room.zombieHealth.delete(zombieId);
+        broadcast(room, {
+          type: "zombie_killed",
+          zombieId,
+        });
+      } else {
+        room.zombieHealth.set(zombieId, nextHealth);
+        broadcast(room, {
+          type: "zombie_damaged",
+          zombieId,
+          health: nextHealth,
+        });
       }
       return;
     }
@@ -216,6 +282,16 @@ function attachSocketHandlers(ws) {
         send(room.guestSocket, {
           type: "shot",
           shot: message.shot,
+        });
+      }
+      return;
+    }
+
+    if (message.type === "remote_damage") {
+      if (ws.coopRole === "host") {
+        send(room.guestSocket, {
+          type: "remote_damage",
+          amount: Number(message.amount) || 0,
         });
       }
       return;

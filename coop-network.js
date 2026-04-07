@@ -102,6 +102,9 @@ export function createCoopClient({ url, onMessage, onOpen, onClose, onError }) {
     joinRoom(code) {
       return send("join_room", { code });
     },
+    requestStart() {
+      return send("request_start");
+    },
     lobbyReady() {
       return send("lobby_ready");
     },
@@ -116,6 +119,12 @@ export function createCoopClient({ url, onMessage, onOpen, onClose, onError }) {
     },
     sendShot(shot) {
       return send("shot", { shot });
+    },
+    sendZombieHit(zombieId, damage) {
+      return send("zombie_hit", { zombieId, damage });
+    },
+    sendRemoteDamage(amount) {
+      return send("remote_damage", { amount });
     },
     disconnectRoom() {
       return send("disconnect_room");

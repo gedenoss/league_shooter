@@ -226,9 +226,9 @@ coopMenuEl.innerHTML = `
 
     <div id="coop-choice-screen" style="display:block;">
       <div style="font:400 13px/1.4 monospace; color:#b8bcc2; margin-bottom:16px;">Choisis ton role pour la partie.</div>
-      <div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; margin-bottom:12px;">
-        <button id="coop-host-btn" type="button" style="padding:14px 16px; border:1px solid #58789a; border-radius:8px; background:#17314a; color:#fff; font:700 16px/1 monospace; cursor:pointer;">HEBERGER</button>
-        <button id="coop-join-btn" type="button" style="padding:14px 16px; border:1px solid #6b7b8b; border-radius:8px; background:#1a1d22; color:#fff; font:700 16px/1 monospace; cursor:pointer;">REJOINDRE</button>
+      <div style="display:flex; flex-wrap:wrap; gap:12px; margin-bottom:12px;">
+        <button id="coop-host-btn" type="button" style="flex:1 1 220px; padding:14px 16px; border:1px solid #58789a; border-radius:8px; background:#17314a; color:#fff; font:700 16px/1 monospace; cursor:pointer;">HEBERGER</button>
+        <button id="coop-join-btn" type="button" style="flex:1 1 220px; padding:14px 16px; border:1px solid #6b7b8b; border-radius:8px; background:#1a1d22; color:#fff; font:700 16px/1 monospace; cursor:pointer;">REJOINDRE</button>
       </div>
       <button id="coop-close-btn" type="button" style="padding:12px 16px; border:1px solid #4a4f57; border-radius:8px; background:#111418; color:#fff; font:700 14px/1 monospace; cursor:pointer;">FERMER</button>
     </div>
@@ -236,7 +236,7 @@ coopMenuEl.innerHTML = `
     <div id="coop-code-screen" style="display:none;">
       <div id="coop-status" style="font:700 14px/1.2 monospace; color:#8fd2ff; margin-bottom:12px;">En attente...</div>
       <div id="coop-code-row" style="display:none; margin-bottom:12px; font:700 26px/1 monospace; letter-spacing:4px; color:#fff;"></div>
-      <div style="display:grid; grid-template-columns:1fr auto; gap:10px; align-items:center; margin-bottom:12px;">
+      <div id="coop-code-input-row" style="display:grid; grid-template-columns:1fr auto; gap:10px; align-items:center; margin-bottom:12px;">
         <input id="coop-code-input" maxlength="6" inputmode="numeric" placeholder="ENTRER LE CODE" style="width:100%; padding:14px 16px; border-radius:8px; border:1px solid #4a4f57; background:#1a1d22; color:#fff; font:700 18px/1 monospace; letter-spacing:4px; text-transform:uppercase;" />
         <button id="coop-submit-btn" type="button" style="padding:14px 16px; border:1px solid #58789a; border-radius:8px; background:#17314a; color:#fff; font:700 14px/1 monospace; cursor:pointer;">VALIDER</button>
       </div>
@@ -250,6 +250,7 @@ coopMenuEl.innerHTML = `
 document.body.appendChild(coopMenuEl);
 const coopChoiceScreenEl = coopMenuEl.querySelector("#coop-choice-screen");
 const coopCodeScreenEl = coopMenuEl.querySelector("#coop-code-screen");
+const coopCodeInputRowEl = coopMenuEl.querySelector("#coop-code-input-row");
 const coopStatusEl = coopMenuEl.querySelector("#coop-status");
 const coopCodeRowEl = coopMenuEl.querySelector("#coop-code-row");
 const coopHostBtnEl = coopMenuEl.querySelector("#coop-host-btn");
@@ -271,6 +272,12 @@ function setCoopScreen(mode) {
   }
 }
 
+function setCoopHostView(enabled) {
+  if (coopCodeInputRowEl) {
+    coopCodeInputRowEl.style.display = enabled ? "none" : "grid";
+  }
+}
+
 function submitJoinCode() {
   coopClient.connect();
   const code = String(coopCodeInputEl?.value || "")
@@ -287,6 +294,7 @@ function submitJoinCode() {
 if (coopHostBtnEl) {
   coopHostBtnEl.addEventListener("click", () => {
     setCoopScreen("code");
+    setCoopHostView(true);
     if (coopCodeInputEl) {
       coopCodeInputEl.value = "";
       coopCodeInputEl.disabled = true;
@@ -309,6 +317,7 @@ if (coopHostBtnEl) {
 if (coopJoinBtnEl) {
   coopJoinBtnEl.addEventListener("click", () => {
     setCoopScreen("code");
+    setCoopHostView(false);
     if (coopCodeInputEl) {
       coopCodeInputEl.disabled = false;
       coopCodeInputEl.placeholder = "ENTRER LE CODE";
@@ -443,6 +452,7 @@ function openCoopMenu() {
   coopClient.connect();
   showCoopMenu();
   setCoopScreen("choice");
+  setCoopHostView(false);
   if (coopHostBtnEl) {
     coopHostBtnEl.disabled = false;
   }
@@ -475,6 +485,7 @@ function enableCoopMode(role, roomCode) {
   coopState.active = true;
   coopState.role = role;
   coopState.roomCode = roomCode || coopState.roomCode;
+  coopState.waitingForGuest = false;
   setCoopStatus(
     role === "host" ? "Partie coop hebergee." : "Partie coop rejointe.",
   );
@@ -508,6 +519,7 @@ function handleCoopMessage(message) {
     coopState.role = "host";
     coopState.waitingForGuest = true;
     setCoopScreen("code");
+    setCoopHostView(true);
     setCoopStatus("Code genere. En attente d'un autre joueur.");
     setCoopCode(message.code);
     if (coopCodeInputEl) {
@@ -527,7 +539,6 @@ function handleCoopMessage(message) {
     if (coopJoinBtnEl) {
       coopJoinBtnEl.disabled = true;
     }
-    coopClient.lobbyReady();
     return;
   }
 
@@ -535,8 +546,10 @@ function handleCoopMessage(message) {
     coopState.roomCode = message.code;
     coopState.role = "guest";
     coopState.pauseOpen = false;
+    coopState.waitingForGuest = false;
     setCoopScreen("code");
-    setCoopStatus("Rejoint. En attente de l'hebergeur.");
+    setCoopHostView(true);
+    setCoopStatus("Connecte. Clique le bouton zombie pour lancer les vagues.");
     setCoopCode(message.code);
     if (coopCodeInputEl) {
       coopCodeInputEl.disabled = true;
@@ -546,16 +559,25 @@ function handleCoopMessage(message) {
       coopSubmitBtnEl.textContent = "EN ATTENTE";
     }
     if (coopTimerEl) {
-      coopTimerEl.textContent = "Attente lancement partie...";
+      coopTimerEl.textContent = "Pret a lancer.";
     }
-    coopClient.lobbyReady();
     return;
   }
 
   if (message.type === "guest_joined") {
-    setCoopStatus("Le second joueur est arrive. Synchronisation...");
-    // Re-ack host readiness to avoid lobby deadlocks on reconnect/race conditions.
-    coopClient.lobbyReady();
+    coopState.waitingForGuest = false;
+    setCoopStatus(
+      "Ami connecte. Clique le bouton zombie pour lancer les vagues.",
+    );
+    return;
+  }
+
+  if (message.type === "start_error") {
+    if (message.error === "WAITING_FOR_PLAYER") {
+      setCoopStatus("Attends qu'un 2e joueur rejoigne la room.");
+    } else {
+      setCoopStatus("Impossible de lancer maintenant.");
+    }
     return;
   }
 
@@ -571,6 +593,7 @@ function handleCoopMessage(message) {
   if (message.type === "snapshot") {
     if (coopState.role === "guest") {
       applyCoopSnapshot(message.snapshot);
+      coopState.lastSnapshotAt = Date.now();
     }
     return;
   }
@@ -578,6 +601,7 @@ function handleCoopMessage(message) {
   if (message.type === "guest_state") {
     if (coopState.role === "host") {
       updateRemotePlayerProxy(message.snapshot?.player);
+      coopState.lastSnapshotAt = Date.now();
     }
     return;
   }
@@ -619,6 +643,23 @@ function handleCoopMessage(message) {
     return;
   }
 
+  if (message.type === "remote_damage" && coopState.role === "guest") {
+    applyPlayerDamage(message.amount || 1);
+    triggerDamageOverlay();
+    updateHealthHud();
+    return;
+  }
+
+  if (message.type === "zombie_damaged") {
+    applyServerZombieDamage(message.zombieId, message.health);
+    return;
+  }
+
+  if (message.type === "zombie_killed") {
+    applyServerZombieKill(message.zombieId);
+    return;
+  }
+
   if (message.type === "room_error") {
     setCoopScreen("code");
     if (coopCodeInputEl) {
@@ -637,6 +678,7 @@ function handleCoopMessage(message) {
     coopState.active = false;
     coopState.role = null;
     coopState.roomCode = "";
+    coopState.waitingForGuest = false;
     setCoopStatus("Connexion coupee.");
     setCoopCode("");
     if (coopHostBtnEl) {
@@ -895,15 +937,37 @@ player.add(camera);
 camera.position.set(0, 0, 0);
 
 const remotePlayerProxy = new Mesh(
-  new BoxGeometry(0.65, 1.6, 0.65),
+  new BoxGeometry(0.7, 1.3, 0.48),
   new MeshStandardMaterial({
-    color: 0x7bb5ff,
-    roughness: 0.75,
-    metalness: 0.02,
-    emissive: 0x10233c,
+    color: 0x58a8ff,
+    roughness: 0.62,
+    metalness: 0.05,
+    emissive: 0x143b6f,
+    emissiveIntensity: 0.28,
+  }),
+);
+const remotePlayerHead = new Mesh(
+  new SphereGeometry(0.23, 14, 12),
+  new MeshStandardMaterial({
+    color: 0xaed4ff,
+    roughness: 0.55,
+    metalness: 0.08,
+    emissive: 0x1f4e84,
     emissiveIntensity: 0.2,
   }),
 );
+remotePlayerHead.position.set(0, 0.95, 0);
+remotePlayerProxy.add(remotePlayerHead);
+
+const remotePlayerChestMark = new Mesh(
+  new BoxGeometry(0.22, 0.22, 0.03),
+  new MeshBasicMaterial({
+    color: 0xffffff,
+  }),
+);
+remotePlayerChestMark.position.set(0, 0.25, 0.26);
+remotePlayerProxy.add(remotePlayerChestMark);
+
 remotePlayerProxy.position.set(0, -1000, 0);
 remotePlayerProxy.visible = false;
 scene.add(remotePlayerProxy);
@@ -1932,9 +1996,51 @@ function updateRemotePlayerProxy(snapshot) {
     return;
   }
 
+  coopState.remotePlayer.x = snapshot.x;
+  coopState.remotePlayer.y = snapshot.y;
+  coopState.remotePlayer.z = snapshot.z;
+  coopState.remotePlayer.yaw = snapshot.yaw || 0;
+  coopState.remotePlayer.pitch = snapshot.pitch || 0;
+  coopState.remotePlayer.health =
+    snapshot.health ?? coopState.remotePlayer.health;
+  coopState.remotePlayer.ammo = snapshot.ammo ?? coopState.remotePlayer.ammo;
+
   remotePlayerProxy.visible = true;
   remotePlayerProxy.position.set(snapshot.x, snapshot.y, snapshot.z);
   remotePlayerProxy.rotation.y = snapshot.yaw || 0;
+}
+
+function getZombiePrimaryTarget(zombie) {
+  const localTarget = {
+    x: player.position.x,
+    y: player.position.y,
+    z: player.position.z,
+    isRemote: false,
+  };
+
+  if (
+    !coopState.active ||
+    coopState.role !== "host" ||
+    !remotePlayerProxy.visible
+  ) {
+    return localTarget;
+  }
+
+  const remoteTarget = {
+    x: coopState.remotePlayer.x,
+    y: coopState.remotePlayer.y,
+    z: coopState.remotePlayer.z,
+    isRemote: true,
+  };
+
+  const localDistSq =
+    (localTarget.x - zombie.mesh.position.x) ** 2 +
+    (localTarget.z - zombie.mesh.position.z) ** 2;
+  const remoteDistSq =
+    (remoteTarget.x - zombie.mesh.position.x) ** 2 +
+    (remoteTarget.z - zombie.mesh.position.z) ** 2;
+
+  return remoteDistSq < localDistSq ? remoteTarget : localTarget;
 }
 
 function upsertZombieFromSnapshot(zombieSnapshot) {
@@ -1962,6 +2068,35 @@ function upsertZombieFromSnapshot(zombieSnapshot) {
   zombie.health = zombieSnapshot.health;
   zombie.variant = zombieSnapshot.variant || zombie.variant;
   zombie.contactCooldown = zombieSnapshot.contactCooldown || 0;
+}
+
+function findZombieByNetworkId(id) {
+  if (!id) {
+    return null;
+  }
+  return zombies.find((item) => item.networkId === id) || null;
+}
+
+function applyServerZombieDamage(zombieId, health) {
+  const zombie = findZombieByNetworkId(zombieId);
+  if (!zombie) {
+    return;
+  }
+
+  zombie.health = Math.max(0, Number(health) || 0);
+  if (zombie.health <= 0) {
+    removeZombie(zombie);
+  } else {
+    updateWaveHud();
+  }
+}
+
+function applyServerZombieKill(zombieId) {
+  const zombie = findZombieByNetworkId(zombieId);
+  if (!zombie) {
+    return;
+  }
+  removeZombie(zombie);
 }
 
 function applyCoopSnapshot(snapshot) {
@@ -2618,6 +2753,17 @@ function activateZombieMode() {
     return;
   }
 
+  if (coopState.roomCode && coopState.role && !coopState.active) {
+    if (coopState.waitingForGuest) {
+      setCoopStatus("Attente du 2e joueur pour lancer la coop.");
+      return;
+    }
+
+    setCoopStatus("Demarrage des vagues en coop...");
+    coopClient.requestStart();
+    return;
+  }
+
   zombieModeActive = true;
   currentWave = 0;
   nextWaveTimer = 0;
@@ -2658,6 +2804,10 @@ function resetRun() {
   }
   muzzleFlash.material.opacity = 0;
   clearZombies();
+  if (remotePlayerProxy) {
+    remotePlayerProxy.visible = false;
+    remotePlayerProxy.position.set(0, -1000, 0);
+  }
   updateModeButtonVisual("ready");
   if (gameOverOverlayEl) {
     gameOverOverlayEl.style.display = "none";
@@ -2864,10 +3014,12 @@ function updateZombie(zombie, dt) {
 
   initNavGraph();
 
+  const primaryTarget = getZombiePrimaryTarget(zombie);
+
   const toPlayer = new Vector3(
-    player.position.x - zombie.mesh.position.x,
+    primaryTarget.x - zombie.mesh.position.x,
     0,
-    player.position.z - zombie.mesh.position.z,
+    primaryTarget.z - zombie.mesh.position.z,
   );
   const playerDistance = toPlayer.length();
 
@@ -2875,12 +3027,18 @@ function updateZombie(zombie, dt) {
   if (zombie.repathTimer <= 0) {
     zombie.repathTimer = 0.35 + Math.random() * 0.15;
     const startNode = findClosestNavNodeIndex(zombie.mesh.position);
-    const endNode = findClosestNavNodeIndex(player.position);
+    const endNode = findClosestNavNodeIndex(
+      new Vector3(primaryTarget.x, FLOOR_Y + zombie.centerY, primaryTarget.z),
+    );
     zombie.path = findNavPath(startNode, endNode);
     zombie.pathIndex = 0;
   }
 
-  let targetPos = player.position;
+  let targetPos = new Vector3(
+    primaryTarget.x,
+    FLOOR_Y + zombie.centerY,
+    primaryTarget.z,
+  );
   if (zombie.path.length > 0 && zombie.pathIndex < zombie.path.length) {
     const currentNodeIndex = zombie.path[zombie.pathIndex];
     const nodePos = navNodes[currentNodeIndex];
@@ -2957,29 +3115,39 @@ function updateZombie(zombie, dt) {
     }
 
     zombie.mesh.rotation.y = Math.atan2(
-      player.position.x - zombie.mesh.position.x,
-      player.position.z - zombie.mesh.position.z,
+      primaryTarget.x - zombie.mesh.position.x,
+      primaryTarget.z - zombie.mesh.position.z,
     );
   }
 
   zombie.contactCooldown = Math.max(0, zombie.contactCooldown - dt);
   if (playerDistance <= zombie.contactRange && zombie.contactCooldown <= 0) {
-    applyPlayerDamage(zombie.contactDamage);
+    if (
+      primaryTarget.isRemote &&
+      coopState.active &&
+      coopState.role === "host"
+    ) {
+      coopClient.sendRemoteDamage(zombie.contactDamage);
+    } else {
+      applyPlayerDamage(zombie.contactDamage);
+      triggerDamageOverlay();
+      updateHealthHud();
+    }
     zombie.contactCooldown = ZOMBIE_CONTACT_COOLDOWN;
     playZombieSound(true);
-    triggerDamageOverlay();
-    updateHealthHud();
   }
 }
 
 function updateZombieWaves(dt) {
-  if (
-    !zombieModeActive ||
-    gameOverActive ||
-    upgradeMenuActive ||
-    (coopState.active && coopState.role === "guest")
-  ) {
+  if (!zombieModeActive || gameOverActive || upgradeMenuActive) {
     return;
+  }
+
+  if (coopState.active && coopState.role === "guest") {
+    const snapshotStaleMs = Date.now() - (coopState.lastSnapshotAt || 0);
+    if (snapshotStaleMs < 1200) {
+      return;
+    }
   }
 
   if (zombies.length > 0) {
@@ -3003,12 +3171,15 @@ function updateZombieWaves(dt) {
 }
 
 function updateZombies(dt) {
-  if (
-    !zombieModeActive ||
-    gameOverActive ||
-    (coopState.active && coopState.role === "guest")
-  ) {
+  if (!zombieModeActive || gameOverActive) {
     return;
+  }
+
+  if (coopState.active && coopState.role === "guest") {
+    const snapshotStaleMs = Date.now() - (coopState.lastSnapshotAt || 0);
+    if (snapshotStaleMs < 1200) {
+      return;
+    }
   }
 
   for (const zombie of [...zombies]) {
@@ -3079,15 +3250,25 @@ function shoot(spreadX = 0, spreadY = 0) {
             null,
         );
         const isHeadshot = hitObject.userData?.isZombieHead === true;
-        zombieRef.health -=
+        const dealtDamage =
           (isHeadshot ? HEADSHOT_MULTIPLIER : 1) * playerDamageMultiplier;
+
+        if (coopState.active) {
+          coopClient.sendZombieHit(zombieRef.networkId, dealtDamage);
+        } else {
+          zombieRef.health -= dealtDamage;
+        }
+
         if (isHeadshot) {
           playHeadshotBell();
         }
-        if (zombieRef.health <= 0) {
-          removeZombie(zombieRef);
-        } else {
-          updateWaveHud();
+
+        if (!coopState.active) {
+          if (zombieRef.health <= 0) {
+            removeZombie(zombieRef);
+          } else {
+            updateWaveHud();
+          }
         }
       }
     }
@@ -3142,11 +3323,15 @@ function applyRemoteShot(shot) {
       hit.face?.normal?.clone().transformDirection(hit.object.matrixWorld) ??
         null,
     );
-    zombieRef.health -= 1;
-    if (zombieRef.health <= 0) {
-      removeZombie(zombieRef);
+    if (coopState.active) {
+      coopClient.sendZombieHit(zombieRef.networkId, 1);
     } else {
-      updateWaveHud();
+      zombieRef.health -= 1;
+      if (zombieRef.health <= 0) {
+        removeZombie(zombieRef);
+      } else {
+        updateWaveHud();
+      }
     }
   }
 }
