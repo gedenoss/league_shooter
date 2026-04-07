@@ -297,6 +297,18 @@ function attachSocketHandlers(ws) {
       return;
     }
 
+    if (message.type === "game_over") {
+      if (!room.gameStarted) {
+        return;
+      }
+
+      broadcast(room, {
+        type: "coop_game_over",
+        by: ws.coopRole || "unknown",
+      });
+      return;
+    }
+
     if (message.type === "disconnect_room") {
       closeRoom(room, "player_left");
     }

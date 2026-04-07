@@ -469,6 +469,10 @@ function updateCoopRoomHud() {
   ).toUpperCase()}`;
 }
 
+function isCoopRoomLinked() {
+  return Boolean(coopState.roomCode && coopState.role);
+}
+
 function leaveCoopRoom() {
   coopClient.disconnectRoom();
   coopState.active = false;
@@ -634,6 +638,7 @@ function handleCoopMessage(message) {
     if (coopTimerEl) {
       coopTimerEl.textContent = "Pret a lancer.";
     }
+    closeCoopMenu();
     return;
   }
 
@@ -642,6 +647,7 @@ function handleCoopMessage(message) {
     setCoopStatus(
       "Ami connecte. Clique le bouton zombie pour lancer les vagues.",
     );
+    closeCoopMenu();
     return;
   }
 
@@ -730,6 +736,12 @@ function handleCoopMessage(message) {
 
   if (message.type === "zombie_killed") {
     applyServerZombieKill(message.zombieId);
+    return;
+  }
+
+  if (message.type === "coop_game_over") {
+    triggerGameOver(false);
+    setCoopStatus("Ton allie est KO. Fin de partie synchronisee.");
     return;
   }
 
@@ -2247,8 +2259,8 @@ function applyCoopSnapshot(snapshot) {
     nextWaveTimer = snapshot.nextWaveTimer;
   }
 
-  if (typeof snapshot.gameOverActive === "boolean") {
-    gameOverActive = snapshot.gameOverActive;
+  if (snapshot.gameOverActive === true) {
+    triggerGameOver(false);
   }
 
   if (typeof snapshot.upgradeMenuActive === "boolean") {
@@ -2259,7 +2271,7 @@ function applyCoopSnapshot(snapshot) {
 }
 
 function sendCoopSnapshot() {
-  if (!coopState.active || !coopClient.isConnected()) {
+  if (!isCoopRoomLinked() || !coopClient.isConnected()) {
     return;
   }
 
@@ -2944,7 +2956,7 @@ function resetRun() {
   updateWaveHud();
 }
 
-function triggerGameOver() {
+function triggerGameOver(notifyServer = true) {
   if (gameOverActive) {
     return;
   }
@@ -2958,6 +2970,11 @@ function triggerGameOver() {
   if (gameOverOverlayEl) {
     gameOverOverlayEl.style.display = "block";
   }
+
+  if (notifyServer && coopState.active && coopClient.isConnected()) {
+    coopClient.sendGameOver();
+  }
+
   updateWaveHud();
 }
 
@@ -3599,6 +3616,10 @@ document.addEventListener("pointerlockchange", () => {
     holdShotCount = 0;
   }
 });
+
+setInterval(() => {
+  sendCoopSnapshot();
+}, 250);
 
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;

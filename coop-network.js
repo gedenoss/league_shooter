@@ -126,6 +126,9 @@ export function createCoopClient({ url, onMessage, onOpen, onClose, onError }) {
     sendRemoteDamage(amount) {
       return send("remote_damage", { amount });
     },
+    sendGameOver() {
+      return send("game_over");
+    },
     disconnectRoom() {
       return send("disconnect_room");
     },
