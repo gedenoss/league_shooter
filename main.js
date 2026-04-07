@@ -564,7 +564,7 @@ function enableCoopMode(role, roomCode) {
   );
   setCoopCode(coopState.roomCode);
   closeCoopMenu();
-  resetRun();
+  resetRun(true);
   coopState.selectedCardId = null;
   coopState.pauseOpen = false;
   coopState.lastSentAt = 0;
@@ -687,7 +687,8 @@ function handleCoopMessage(message) {
     coopState.pauseOpen = true;
     coopState.pauseDeadlineAt = Date.now() + (message.deadlineMs || 10_000);
     if (coopClient.getSocket()) {
-      openUpgradeMenu(currentWave || 1, true);
+      const nextWave = Number(message.nextWave) || currentWave + 1;
+      openUpgradeMenu(nextWave, true);
     }
     return;
   }
@@ -2922,7 +2923,11 @@ function activateZombieMode() {
   openUpgradeMenu(1);
 }
 
-function resetRun() {
+function resetRun(preservePose = false) {
+  const savedPos = player.position.clone();
+  const savedYaw = yaw;
+  const savedPitch = pitch;
+
   zombieModeActive = false;
   gameOverActive = false;
   gameOverTimer = 0;
@@ -2943,9 +2948,15 @@ function resetRun() {
   nextTapShotAt = nextAutoShotAt;
   verticalVelocity = 0;
   isGrounded = true;
-  player.position.set(-13, groundY, 0);
-  yaw = 0;
-  pitch = 0;
+  if (preservePose) {
+    player.position.copy(savedPos);
+    yaw = savedYaw;
+    pitch = savedPitch;
+  } else {
+    player.position.set(-13, groundY, 0);
+    yaw = 0;
+    pitch = 0;
+  }
   player.rotation.y = yaw;
   camera.rotation.x = pitch;
   gunHolder.position.z = GUN_HOLDER_BASE.z;
@@ -3649,6 +3660,12 @@ function animate() {
   updateAmmoHud();
 
   if (gameOverActive) {
+    if (coopState.active) {
+      updateShootingStars(dt);
+      renderer.render(scene, camera);
+      return;
+    }
+
     gameOverTimer -= dt;
     if (gameOverTimer <= 0) {
       resetRun();

@@ -7,6 +7,9 @@ const ROOM_CODE_LENGTH = 6;
 const PLAYER_MAX_HEALTH = 100;
 const SNAPSHOT_TICK_MS = 80;
 const WAVE_CLEAR_DELAY_MS = 1500;
+const ZOMBIE_BASE_SPEED = 2.05;
+const ZOMBIE_SPEED_PER_WAVE = 0.12;
+const ZOMBIE_SPECIAL_CHANCE = 0.2;
 
 const rooms = new Map();
 const sockets = new Map();
@@ -15,25 +18,25 @@ let nextZombieId = 1;
 
 const ZOMBIE_VARIANTS = [
   {
-    key: "walker",
-    speed: 2.2,
-    hpBase: 22,
-    contactDamage: 8,
-    contactRange: 1.25,
-  },
-  {
-    key: "brute",
-    speed: 1.55,
-    hpBase: 40,
-    contactDamage: 12,
-    contactRange: 1.4,
-  },
-  {
-    key: "sprinter",
-    speed: 3.3,
-    hpBase: 16,
-    contactDamage: 7,
+    key: "base",
+    health: 5,
+    damage: 9,
     contactRange: 1.1,
+    speedMultiplier: 1,
+  },
+  {
+    key: "dog",
+    health: 2.8,
+    damage: 3.5,
+    contactRange: 0.92,
+    speedMultiplier: 2.2,
+  },
+  {
+    key: "tank",
+    health: 15,
+    damage: 11,
+    contactRange: 1.28,
+    speedMultiplier: 0.52,
   },
 ];
 
@@ -99,31 +102,54 @@ function makeRoom(code, hostSocket) {
     zombies: [],
     currentWave: 0,
     nextWaveAt: 0,
+    pendingWave: 0,
     lastTickAt: Date.now(),
+    gameOver: false,
   };
 }
 
-function chooseVariant() {
-  const idx = Math.floor(Math.random() * ZOMBIE_VARIANTS.length);
-  return ZOMBIE_VARIANTS[idx];
+function toFiniteNumber(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function getZombieSpecialChance(waveIndex) {
+  return Math.min(
+    1,
+    ZOMBIE_SPECIAL_CHANCE + Math.floor((waveIndex - 1) / 10) * 0.1,
+  );
+}
+
+function chooseVariant(waveIndex) {
+  const base = ZOMBIE_VARIANTS[0];
+  const dog = ZOMBIE_VARIANTS[1];
+  const tank = ZOMBIE_VARIANTS[2];
+
+  if (Math.random() >= getZombieSpecialChance(waveIndex)) {
+    return base;
+  }
+
+  return Math.random() < 0.5 ? dog : tank;
 }
 
 function spawnWave(room, waveIndex) {
   room.currentWave = Math.max(1, waveIndex);
   room.zombies = [];
+  room.pendingWave = 0;
   const count = room.currentWave;
+  const waveSpeed =
+    ZOMBIE_BASE_SPEED + (room.currentWave - 1) * ZOMBIE_SPEED_PER_WAVE;
   for (let i = 0; i < count; i += 1) {
-    const variant = chooseVariant();
-    const health = variant.hpBase + Math.floor(room.currentWave * 2.5);
+    const variant = chooseVariant(room.currentWave);
     room.zombies.push({
       id: `z${nextZombieId++}`,
       x: randomBetween(-14.5, 14.5),
       y: 1.1,
       z: randomBetween(-8.8, 8.8),
-      health,
+      health: variant.health,
       variant: variant.key,
-      speed: variant.speed,
-      contactDamage: variant.contactDamage,
+      speed: waveSpeed * variant.speedMultiplier,
+      contactDamage: variant.damage,
       contactRange: variant.contactRange,
       contactCooldownMs: 0,
     });
@@ -178,8 +204,7 @@ function broadcastSnapshot(room) {
       room.nextWaveAt > 0
         ? Math.max(0, (room.nextWaveAt - Date.now()) / 1000)
         : 0,
-    gameOverActive:
-      room.players.host.health <= 0 || room.players.guest.health <= 0,
+    gameOverActive: room.gameOver,
     upgradeMenuActive: false,
     at: Date.now(),
   };
@@ -214,7 +239,11 @@ function applyZombieHit(room, zombieId, damage) {
 }
 
 function tickRoom(room, now) {
-  if (!room.gameStarted) {
+  if (!room.gameStarted || room.gameOver) {
+    return;
+  }
+
+  if (room.menuOpenAt && room.menuDeadlineAt) {
     return;
   }
 
@@ -253,10 +282,12 @@ function tickRoom(room, now) {
       });
 
       if (victim.health <= 0) {
+        room.gameOver = true;
         broadcast(room, {
           type: "coop_game_over",
           by: "server",
         });
+        break;
       }
     }
   }
@@ -265,7 +296,23 @@ function tickRoom(room, now) {
     if (!room.nextWaveAt) {
       room.nextWaveAt = now + WAVE_CLEAR_DELAY_MS;
     } else if (now >= room.nextWaveAt) {
-      spawnWave(room, room.currentWave + 1);
+      const nextWave = room.currentWave + 1;
+      room.nextWaveAt = 0;
+
+      if (nextWave % 5 === 0) {
+        room.pendingWave = nextWave;
+        room.menuOpenAt = now;
+        room.menuDeadlineAt = now + PAUSE_TIMEOUT_MS;
+        room.hostChoice = null;
+        room.guestChoice = null;
+        broadcast(room, {
+          type: "pause_open",
+          deadlineMs: PAUSE_TIMEOUT_MS,
+          nextWave,
+        });
+      } else {
+        spawnWave(room, nextWave);
+      }
     }
   }
 }
@@ -393,8 +440,14 @@ function attachSocketHandlers(ws) {
 
       if (!room.gameStarted) {
         room.gameStarted = true;
+        room.gameOver = false;
         room.players.host.health = PLAYER_MAX_HEALTH;
         room.players.guest.health = PLAYER_MAX_HEALTH;
+        room.menuOpenAt = null;
+        room.menuDeadlineAt = null;
+        room.hostChoice = null;
+        room.guestChoice = null;
+        room.pendingWave = 0;
         room.lastTickAt = Date.now();
         spawnWave(room, 1);
       }
@@ -413,9 +466,14 @@ function attachSocketHandlers(ws) {
       room.menuDeadlineAt = Date.now() + PAUSE_TIMEOUT_MS;
       room.hostChoice = null;
       room.guestChoice = null;
+      room.pendingWave = Math.max(
+        room.pendingWave || 0,
+        Number(message.nextWave) || room.currentWave + 1,
+      );
       broadcast(room, {
         type: "pause_open",
         deadlineMs: PAUSE_TIMEOUT_MS,
+        nextWave: room.pendingWave || room.currentWave + 1,
       });
       return;
     }
@@ -435,13 +493,19 @@ function attachSocketHandlers(ws) {
       });
 
       if (room.hostChoice && room.guestChoice) {
+        const waveToStart = room.pendingWave;
         room.menuDeadlineAt = null;
+        room.menuOpenAt = null;
+        room.pendingWave = 0;
         broadcast(room, {
           type: "pause_resolve",
           hostChoice: room.hostChoice,
           guestChoice: room.guestChoice,
           resolvedAt: Date.now(),
         });
+        if (waveToStart > 0) {
+          spawnWave(room, waveToStart);
+        }
       }
       return;
     }
@@ -452,12 +516,12 @@ function attachSocketHandlers(ws) {
         const role = ws.coopRole;
         room.players[role] = {
           ...room.players[role],
-          x: Number(player.x) || room.players[role].x,
-          y: Number(player.y) || room.players[role].y,
-          z: Number(player.z) || room.players[role].z,
-          yaw: Number(player.yaw) || 0,
-          pitch: Number(player.pitch) || 0,
-          ammo: Number(player.ammo) || room.players[role].ammo,
+          x: toFiniteNumber(player.x, room.players[role].x),
+          y: toFiniteNumber(player.y, room.players[role].y),
+          z: toFiniteNumber(player.z, room.players[role].z),
+          yaw: toFiniteNumber(player.yaw, room.players[role].yaw),
+          pitch: toFiniteNumber(player.pitch, room.players[role].pitch),
+          ammo: toFiniteNumber(player.ammo, room.players[role].ammo),
           isReloading: Boolean(player.isReloading),
           updatedAt: Date.now(),
         };
@@ -491,9 +555,11 @@ function attachSocketHandlers(ws) {
     }
 
     if (message.type === "game_over") {
-      if (!room.gameStarted) {
+      if (!room.gameStarted || room.gameOver) {
         return;
       }
+
+      room.gameOver = true;
 
       broadcast(room, {
         type: "coop_game_over",
@@ -543,12 +609,19 @@ setInterval(() => {
       room.menuDeadlineAt &&
       now > room.menuDeadlineAt
     ) {
+      const waveToStart = room.pendingWave;
       broadcast(room, {
         type: "pause_timeout",
         roomCode: code,
       });
       room.menuOpenAt = null;
       room.menuDeadlineAt = null;
+      room.hostChoice = null;
+      room.guestChoice = null;
+      room.pendingWave = 0;
+      if (waveToStart > 0) {
+        spawnWave(room, waveToStart);
+      }
     }
 
     if (now - room.createdAt > LOBBY_TIMEOUT_MS && !room.gameStarted) {
