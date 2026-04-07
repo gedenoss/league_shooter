@@ -1,7 +1,8 @@
 const { WebSocketServer } = require("ws");
 
 const PORT = Number(process.env.PORT || 8080);
-const MAX_ROOM_AGE_MS = 10_000;
+const LOBBY_TIMEOUT_MS = 120_000;
+const PAUSE_TIMEOUT_MS = 10_000;
 const ROOM_CODE_LENGTH = 6;
 
 const rooms = new Map();
@@ -86,7 +87,7 @@ function attachSocketHandlers(ws) {
         type: "room_created",
         code,
         socketId: getSocketId(ws),
-        deadlineMs: MAX_ROOM_AGE_MS,
+        deadlineMs: LOBBY_TIMEOUT_MS,
       });
       return;
     }
@@ -100,8 +101,8 @@ function attachSocketHandlers(ws) {
       }
 
       room.guestSocket = ws;
-      room.menuOpenAt = Date.now();
-      room.menuDeadlineAt = Date.now() + MAX_ROOM_AGE_MS;
+      room.menuOpenAt = null;
+      room.menuDeadlineAt = null;
       ws.coopRole = "guest";
       ws.roomCode = code;
       ws.coopReady = false;
@@ -114,7 +115,7 @@ function attachSocketHandlers(ws) {
         code,
         socketId: getSocketId(ws),
         role: "guest",
-        deadlineMs: MAX_ROOM_AGE_MS,
+        deadlineMs: LOBBY_TIMEOUT_MS,
       });
       send(room.hostSocket, {
         type: "guest_joined",
@@ -155,12 +156,12 @@ function attachSocketHandlers(ws) {
 
     if (message.type === "pause_open") {
       room.menuOpenAt = Date.now();
-      room.menuDeadlineAt = Date.now() + MAX_ROOM_AGE_MS;
+      room.menuDeadlineAt = Date.now() + PAUSE_TIMEOUT_MS;
       room.hostChoice = null;
       room.guestChoice = null;
       broadcast(room, {
         type: "pause_open",
-        deadlineMs: MAX_ROOM_AGE_MS,
+        deadlineMs: PAUSE_TIMEOUT_MS,
       });
       return;
     }
@@ -180,6 +181,7 @@ function attachSocketHandlers(ws) {
       });
 
       if (room.hostChoice && room.guestChoice) {
+        room.menuDeadlineAt = null;
         broadcast(room, {
           type: "pause_resolve",
           hostChoice: room.hostChoice,
@@ -252,7 +254,7 @@ wss.on("connection", (ws) => {
 setInterval(() => {
   const now = Date.now();
   for (const [code, room] of rooms.entries()) {
-    if (room.menuDeadlineAt && now > room.menuDeadlineAt && !room.gameStarted) {
+    if (room.menuDeadlineAt && now > room.menuDeadlineAt) {
       broadcast(room, {
         type: "pause_timeout",
         roomCode: code,
@@ -260,7 +262,7 @@ setInterval(() => {
       room.menuDeadlineAt = null;
     }
 
-    if (now - room.createdAt > MAX_ROOM_AGE_MS * 12 && !room.gameStarted) {
+    if (now - room.createdAt > LOBBY_TIMEOUT_MS && !room.gameStarted) {
       closeRoom(room, "timeout");
     }
   }

@@ -248,7 +248,7 @@ const coopTimerEl = coopMenuEl.querySelector("#coop-timer");
 
 if (coopHostBtnEl) {
   coopHostBtnEl.addEventListener("click", () => {
-    console.log("[COOP] Bouton HOST clique, appel hostRoom...");
+    coopClient.connect();
     setCoopStatus("Generation du code. Attends...");
     coopClient.hostRoom();
   });
@@ -256,21 +256,14 @@ if (coopHostBtnEl) {
 
 if (coopJoinBtnEl) {
   coopJoinBtnEl.addEventListener("click", () => {
+    coopClient.connect();
     const code = String(coopCodeInputEl?.value || "")
       .replace(/\D/g, "")
       .slice(0, 6);
-    console.log(
-      "[COOP] Bouton JOIN clique, code:",
-      code,
-      "length:",
-      code.length,
-    );
     if (code.length !== 6) {
-      console.warn("[COOP] Code invalide, longueur:", code.length);
       setCoopStatus("Entre un code a 6 chiffres valide.");
       return;
     }
-    console.log("[COOP] Appel joinRoom avec code:", code);
     setCoopStatus(`Connexion au code ${code}...`);
     coopClient.joinRoom(code);
   });
@@ -281,6 +274,13 @@ if (coopCodeInputEl) {
     coopCodeInputEl.value = coopCodeInputEl.value
       .replace(/\D/g, "")
       .slice(0, 6);
+  });
+
+  coopCodeInputEl.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      coopJoinBtnEl?.click();
+    }
   });
 }
 
@@ -339,8 +339,12 @@ function setCoopCode(code) {
 
 function setCoopTimer(seconds) {
   if (coopTimerEl) {
-    coopTimerEl.textContent = `${seconds.toFixed(1)}s max`;
+    coopTimerEl.textContent = `${seconds.toFixed(1)}s`;
   }
+}
+
+function isCoopMenuOpen() {
+  return Boolean(coopMenuEl && coopMenuEl.style.display !== "none");
 }
 
 function showCoopMenu() {
@@ -356,16 +360,33 @@ function hideCoopMenu() {
 }
 
 function openCoopMenu() {
+  if (document.pointerLockElement === renderer.domElement) {
+    document.exitPointerLock();
+  }
+  leftMouseHeld = false;
+  holdShotCount = 0;
   coopClient.connect();
   showCoopMenu();
+  if (coopHostBtnEl) {
+    coopHostBtnEl.disabled = false;
+  }
+  if (coopJoinBtnEl) {
+    coopJoinBtnEl.disabled = false;
+  }
   setCoopStatus("Choisis heberger ou rejoindre.");
   setCoopCode("");
+  if (coopCodeInputEl) {
+    coopCodeInputEl.value = "";
+    coopCodeInputEl.focus();
+  }
   if (coopTimerEl) {
     coopTimerEl.textContent = "–";
   }
 }
 
 function closeCoopMenu() {
+  leftMouseHeld = false;
+  holdShotCount = 0;
   hideCoopMenu();
 }
 
@@ -1255,17 +1276,27 @@ modeButtonMesh.userData.isZombieModeButton = true;
 modeButtonMesh.userData.isDisabled = false;
 shootTargets.push(modeButtonMesh);
 
-coopButtonMesh = createBox(0.12, 1.25, 1.25, 16.0, 1.85, 0, 0x24435f, false, {
-  roughness: 0.45,
-  metalness: 0.08,
-});
+coopButtonMesh = createBox(
+  0.12,
+  1.25,
+  1.25,
+  17.62,
+  1.85,
+  -1.9,
+  0x24435f,
+  false,
+  {
+    roughness: 0.45,
+    metalness: 0.08,
+  },
+);
 const coopButtonPlate = createBox(
   0.06,
   1.65,
   1.65,
-  16.0,
+  17.69,
   1.85,
-  0,
+  -1.9,
   0xebf1f7,
   false,
   {
@@ -1312,7 +1343,7 @@ coopButtonPlate.material.color.set(0xebf1f7);
 coopButtonPlate.material.emissive.set(0x1d2430);
 coopButtonPlate.material.emissiveIntensity = 0.18;
 coopButtonMesh.material.color.set(0x24435f);
-coopButtonMesh.position.set(16.0, 1.85, 0);
+coopButtonMesh.position.set(17.62, 1.85, -1.9);
 coopButtonMesh.material.emissive.set(0x12263a);
 coopButtonMesh.material.emissiveIntensity = 1.1;
 coopButtonMesh.userData.isCoopModeButton = true;
@@ -2887,10 +2918,6 @@ function collidesAt(pos) {
 }
 
 function shoot(spreadX = 0, spreadY = 0) {
-  if (document.pointerLockElement !== renderer.domElement) {
-    renderer.domElement.requestPointerLock();
-  }
-
   const origin = new Vector3();
   playShotSound();
   triggerMuzzleFlash();
@@ -3061,7 +3088,7 @@ function getSpreadOffsetForShot(shotIndex) {
 document.addEventListener("keydown", (e) => {
   ensureAudioContext();
 
-  if (upgradeMenuActive) {
+  if (upgradeMenuActive || isCoopMenuOpen()) {
     return;
   }
 
@@ -3092,7 +3119,7 @@ document.addEventListener("keyup", (e) => {
 });
 
 document.addEventListener("mousemove", (e) => {
-  if (upgradeMenuActive) {
+  if (upgradeMenuActive || isCoopMenuOpen()) {
     return;
   }
 
@@ -3111,7 +3138,7 @@ document.addEventListener("mousemove", (e) => {
 document.addEventListener("mousedown", (e) => {
   ensureAudioContext();
 
-  if (upgradeMenuActive) {
+  if (upgradeMenuActive || isCoopMenuOpen()) {
     return;
   }
 
@@ -3126,7 +3153,7 @@ document.addEventListener("mousedown", (e) => {
 });
 
 document.addEventListener("mouseup", (e) => {
-  if (upgradeMenuActive) {
+  if (upgradeMenuActive || isCoopMenuOpen()) {
     return;
   }
 
@@ -3167,6 +3194,12 @@ function animate() {
   }
 
   if (upgradeMenuActive) {
+    updateShootingStars(dt);
+    renderer.render(scene, camera);
+    return;
+  }
+
+  if (isCoopMenuOpen()) {
     updateShootingStars(dt);
     renderer.render(scene, camera);
     return;
