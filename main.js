@@ -26,6 +26,7 @@ import {
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { createCoopClient } from "./coop-network.js";
 import gameCoreConfig from "./game-core-config.json";
+import gameCore from "./game-core.cjs";
 
 console.log("Le jeu démarre !");
 
@@ -227,6 +228,7 @@ upgradeMenuEl.innerHTML = `
     <div style="font:700 16px/1 monospace; letter-spacing:1px; color:#d7d7d7; margin-bottom:8px;">PAUSE</div>
     <div style="font:700 28px/1.05 monospace; letter-spacing:0.5px; margin-bottom:8px;">CHOISIS UNE CARTE</div>
     <div id="upgrade-coop-timer" style="display:none; font:700 14px/1 monospace; color:#9dc8ff; margin-bottom:8px;">Temps: 10.0s</div>
+    <div id="upgrade-coop-status" style="display:none; font:600 12px/1.3 monospace; color:#cfd7e3; margin-bottom:10px;">Choisis une carte.</div>
     <div style="font:400 13px/1.4 monospace; color:#b8bcc2; margin-bottom:16px;">Le jeu est arrete. Selectionne un boost pour continuer.</div>
     <div id="upgrade-card-grid" style="display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:12px;"></div>
   </div>
@@ -234,6 +236,7 @@ upgradeMenuEl.innerHTML = `
 document.body.appendChild(upgradeMenuEl);
 const upgradeCardGridEl = upgradeMenuEl.querySelector("#upgrade-card-grid");
 const upgradeCoopTimerEl = upgradeMenuEl.querySelector("#upgrade-coop-timer");
+const upgradeCoopStatusEl = upgradeMenuEl.querySelector("#upgrade-coop-status");
 
 const coopMenuEl = document.createElement("div");
 coopMenuEl.style.position = "fixed";
@@ -509,6 +512,18 @@ function setCoopTimer(seconds) {
   }
 }
 
+function setCoopUpgradeStatus(text) {
+  if (!upgradeCoopStatusEl) {
+    return;
+  }
+
+  const shouldShow = coopState.active && upgradeMenuActive;
+  upgradeCoopStatusEl.style.display = shouldShow ? "block" : "none";
+  if (shouldShow) {
+    upgradeCoopStatusEl.textContent = text;
+  }
+}
+
 function isCoopMenuOpen() {
   return Boolean(coopMenuEl && coopMenuEl.style.display !== "none");
 }
@@ -702,6 +717,7 @@ function handleCoopMessage(message) {
       const nextWave = Number(message.nextWave) || currentWave + 1;
       const networkCards = Array.isArray(message.cards) ? message.cards : null;
       openUpgradeMenu(nextWave, true, networkCards);
+      setCoopUpgradeStatus("Choisis une carte.");
       if (message.deadlineAt) {
         const remaining = Math.max(0, (message.deadlineAt - Date.now()) / 1000);
         setCoopTimer(remaining);
@@ -714,6 +730,20 @@ function handleCoopMessage(message) {
     if (coopTimerEl && message.deadlineAt) {
       const remaining = Math.max(0, (message.deadlineAt - Date.now()) / 1000);
       setCoopTimer(remaining);
+    }
+
+    if (upgradeMenuActive && coopState.active) {
+      const me =
+        coopState.role === "host" ? message.hostChoice : message.guestChoice;
+      const ally =
+        coopState.role === "host" ? message.guestChoice : message.hostChoice;
+      if (me && ally) {
+        setCoopUpgradeStatus("Choix des 2 joueurs recu. Application...");
+      } else if (me) {
+        setCoopUpgradeStatus("Choix envoye. En attente de l'autre joueur...");
+      } else {
+        setCoopUpgradeStatus("Choisis une carte.");
+      }
     }
     return;
   }
@@ -1370,9 +1400,6 @@ const upgradeCatalog = [
     subtitle: "Tu tires un peu plus vite.",
     detail: "Reduce les delais entre les tirs de 5%.",
     color: [72, 218, 140],
-    apply() {
-      attackSpeedMultiplier *= 1.05;
-    },
   },
   {
     id: "double-jump",
@@ -1380,10 +1407,6 @@ const upgradeCatalog = [
     subtitle: "Un saut supplementaire en l'air.",
     detail: "Ajoute +1 saut supplementaire a chaque selection.",
     color: [110, 184, 255],
-    apply() {
-      bonusJumpCharges += 1;
-      jumpCharges = getMaxJumpCharges();
-    },
   },
   {
     id: "extra-life",
@@ -1391,9 +1414,6 @@ const upgradeCatalog = [
     subtitle: "Une chance de plus.",
     detail: "Quand ta vie tombe a 0, tu reviens a 100 PV.",
     color: [255, 196, 92],
-    apply() {
-      extraLives += 1;
-    },
   },
   {
     id: "run-speed",
@@ -1401,9 +1421,6 @@ const upgradeCatalog = [
     subtitle: "Tu te deplaces plus vite.",
     detail: "La vitesse de mouvement augmente de 5%.",
     color: [255, 122, 92],
-    apply() {
-      moveSpeedMultiplier *= 1.05;
-    },
   },
   {
     id: "heal-50",
@@ -1411,9 +1428,6 @@ const upgradeCatalog = [
     subtitle: "Coup de pouce immediate.",
     detail: "Regagne 50 points de vie instantanement.",
     color: [108, 255, 157],
-    apply() {
-      playerHealth = Math.min(PLAYER_MAX_HEALTH, playerHealth + 50);
-    },
   },
   {
     id: "damage-up",
@@ -1421,9 +1435,6 @@ const upgradeCatalog = [
     subtitle: "Tes tirs frappent plus fort.",
     detail: "Tous tes degats infliges augmentent de 5%.",
     color: [255, 104, 168],
-    apply() {
-      playerDamageMultiplier *= 1.05;
-    },
   },
 ];
 const upgradeCatalogById = new Map(
@@ -2394,15 +2405,20 @@ function renderUpgradeMenu(cards, waveIndex) {
           return;
         }
         coopState.selectedCardId = card.id;
-        setCoopStatus("Carte choisie. Attente de l'autre joueur...");
+        setCoopUpgradeStatus("Choix envoye. En attente de l'autre joueur...");
         coopClient.choosePauseCard(card.id);
         button.style.borderColor = `rgb(${card.color[0]}, ${card.color[1]}, ${card.color[2]})`;
         button.style.transform = "translateY(-1px)";
+        for (const sibling of upgradeCardGridEl.querySelectorAll("button")) {
+          if (sibling !== button) {
+            sibling.style.opacity = "0.65";
+          }
+        }
         return;
       }
 
       const waveToStart = pendingWaveToStart;
-      card.apply();
+      applyUpgradeById(card.id);
       closeUpgradeMenu();
       updateAmmoHud();
       updateHealthHud();
@@ -2474,8 +2490,10 @@ function openUpgradeMenu(
   updateWaveHud();
   if (coopState.active) {
     setCoopTimer(10);
+    setCoopUpgradeStatus("Choisis une carte.");
   } else if (upgradeCoopTimerEl) {
     upgradeCoopTimerEl.style.display = "none";
+    setCoopUpgradeStatus("");
   }
 }
 
@@ -2487,26 +2505,58 @@ function closeUpgradeMenu() {
   if (upgradeCoopTimerEl) {
     upgradeCoopTimerEl.style.display = "none";
   }
+  if (upgradeCoopStatusEl) {
+    upgradeCoopStatusEl.style.display = "none";
+  }
   updateWaveHud();
 }
 
 function applyUpgradeById(cardId) {
-  const card = upgradeCatalogById.get(cardId);
-  if (card) {
-    card.apply();
+  if (!upgradeCatalogById.has(cardId)) {
+    return;
   }
+
+  const runtime = {
+    health: playerHealth,
+    damageMultiplier: playerDamageMultiplier,
+    attackSpeedMultiplier,
+    moveSpeedMultiplier,
+    bonusJumpCharges,
+    extraLives,
+  };
+  gameCore.applyUpgradeToState(runtime, cardId, PLAYER_MAX_HEALTH);
+
+  playerHealth = runtime.health;
+  playerDamageMultiplier = runtime.damageMultiplier;
+  attackSpeedMultiplier = runtime.attackSpeedMultiplier;
+  moveSpeedMultiplier = runtime.moveSpeedMultiplier;
+  bonusJumpCharges = runtime.bonusJumpCharges;
+  extraLives = runtime.extraLives;
+  jumpCharges = getMaxJumpCharges();
 }
 
 function resolveCoopPause(hostChoice, guestChoice) {
-  const choices = [hostChoice, guestChoice].filter(Boolean);
-  if (choices.length === 0) {
-    choices.push(upgradeCatalog[0].id);
-  }
+  const defaultPool = upgradeCatalog.map((card) => card.id);
+  const resolved = gameCore.resolvePauseChoices(
+    null,
+    hostChoice,
+    guestChoice,
+    defaultPool,
+  );
 
   const waveToStart = pendingWaveToStart;
 
-  for (const choice of choices) {
-    applyUpgradeById(choice);
+  if (coopState.active) {
+    const localChoice =
+      coopState.role === "host" ? resolved.hostChoice : resolved.guestChoice;
+    if (localChoice) {
+      applyUpgradeById(localChoice);
+    }
+  } else {
+    const choices = [resolved.hostChoice, resolved.guestChoice].filter(Boolean);
+    for (const choice of choices) {
+      applyUpgradeById(choice);
+    }
   }
 
   coopState.pauseOpen = false;
@@ -2839,18 +2889,12 @@ function findValidZombieSpawn(baseSpawn) {
 }
 
 function getZombieSpecialChance(waveIndex) {
-  return Math.min(
-    1,
-    ZOMBIE_SPECIAL_CHANCE + Math.floor((waveIndex - 1) / 10) * 0.1,
-  );
+  return gameCore.getZombieSpecialChance(waveIndex);
 }
 
 function pickZombieVariant(waveIndex) {
-  if (Math.random() >= getZombieSpecialChance(waveIndex)) {
-    return ZOMBIE_VARIANTS.base;
-  }
-
-  return Math.random() < 0.5 ? ZOMBIE_VARIANTS.dog : ZOMBIE_VARIANTS.tank;
+  const variantKey = gameCore.pickZombieVariantKey(waveIndex, Math.random());
+  return ZOMBIE_VARIANTS[variantKey] || ZOMBIE_VARIANTS.base;
 }
 
 function createZombie(spawnPosition, waveIndex, options = {}) {

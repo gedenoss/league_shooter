@@ -1,5 +1,6 @@
 const { WebSocketServer } = require("ws");
 const gameCoreConfig = require("./game-core-config.json");
+const gameCore = require("./game-core.cjs");
 
 const PORT = Number(process.env.PORT || 8080);
 const LOBBY_TIMEOUT_MS = 120_000;
@@ -117,9 +118,17 @@ function makeRoom(code, hostSocket) {
     },
     playerUpgrades: {
       host: {
+        damageMultiplier: 1,
+        attackSpeedMultiplier: 1,
+        moveSpeedMultiplier: 1,
+        bonusJumpCharges: 0,
         extraLives: 0,
       },
       guest: {
+        damageMultiplier: 1,
+        attackSpeedMultiplier: 1,
+        moveSpeedMultiplier: 1,
+        bonusJumpCharges: 0,
         extraLives: 0,
       },
     },
@@ -133,12 +142,7 @@ function makeRoom(code, hostSocket) {
 }
 
 function pickPauseCards() {
-  const pool = [...COOP_UPGRADE_IDS];
-  for (let i = pool.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [pool[i], pool[j]] = [pool[j], pool[i]];
-  }
-  return pool.slice(0, 3);
+  return gameCore.pickPauseCards(COOP_UPGRADE_IDS, 3);
 }
 
 function applyServerUpgrade(room, role, cardId) {
@@ -146,30 +150,36 @@ function applyServerUpgrade(room, role, cardId) {
     return;
   }
 
-  if (cardId === "heal-50") {
-    room.players[role].health = Math.min(
-      PLAYER_MAX_HEALTH,
-      room.players[role].health + 50,
-    );
-    return;
-  }
+  const runtime = {
+    health: room.players[role].health,
+    damageMultiplier: room.playerUpgrades[role].damageMultiplier,
+    attackSpeedMultiplier: room.playerUpgrades[role].attackSpeedMultiplier,
+    moveSpeedMultiplier: room.playerUpgrades[role].moveSpeedMultiplier,
+    bonusJumpCharges: room.playerUpgrades[role].bonusJumpCharges,
+    extraLives: room.playerUpgrades[role].extraLives,
+  };
 
-  if (cardId === "extra-life") {
-    room.playerUpgrades[role].extraLives += 1;
-  }
+  gameCore.applyUpgradeToState(runtime, cardId, PLAYER_MAX_HEALTH);
+
+  room.players[role].health = runtime.health;
+  room.playerUpgrades[role].damageMultiplier = runtime.damageMultiplier;
+  room.playerUpgrades[role].attackSpeedMultiplier =
+    runtime.attackSpeedMultiplier;
+  room.playerUpgrades[role].moveSpeedMultiplier = runtime.moveSpeedMultiplier;
+  room.playerUpgrades[role].bonusJumpCharges = runtime.bonusJumpCharges;
+  room.playerUpgrades[role].extraLives = runtime.extraLives;
 }
 
 function resolvePause(room, now) {
-  const offered =
-    room.pauseCards.length > 0 ? room.pauseCards : pickPauseCards();
-  const fallback = offered[0] || COOP_UPGRADE_IDS[0];
-
-  const hostChoice = offered.includes(room.hostChoice)
-    ? room.hostChoice
-    : fallback;
-  const guestChoice = offered.includes(room.guestChoice)
-    ? room.guestChoice
-    : offered[1] || fallback;
+  const resolved = gameCore.resolvePauseChoices(
+    room.pauseCards,
+    room.hostChoice,
+    room.guestChoice,
+    COOP_UPGRADE_IDS,
+  );
+  const offered = resolved.offered;
+  const hostChoice = resolved.hostChoice;
+  const guestChoice = resolved.guestChoice;
 
   applyServerUpgrade(room, "host", hostChoice);
   applyServerUpgrade(room, "guest", guestChoice);
@@ -228,22 +238,12 @@ function toFiniteNumber(value, fallback) {
 }
 
 function getZombieSpecialChance(waveIndex) {
-  return Math.min(
-    1,
-    ZOMBIE_SPECIAL_CHANCE + Math.floor((waveIndex - 1) / 10) * 0.1,
-  );
+  return gameCore.getZombieSpecialChance(waveIndex);
 }
 
 function chooseVariant(waveIndex) {
-  const base = ZOMBIE_VARIANTS[0];
-  const dog = ZOMBIE_VARIANTS[1];
-  const tank = ZOMBIE_VARIANTS[2];
-
-  if (Math.random() >= getZombieSpecialChance(waveIndex)) {
-    return base;
-  }
-
-  return Math.random() < 0.5 ? dog : tank;
+  const key = gameCore.pickZombieVariantKey(waveIndex, Math.random());
+  return ZOMBIE_VARIANTS.find((item) => item.key === key) || ZOMBIE_VARIANTS[0];
 }
 
 function spawnWave(room, waveIndex) {
@@ -371,7 +371,15 @@ function endRoomRound(room) {
   room.players.host.health = PLAYER_MAX_HEALTH;
   room.players.guest.health = PLAYER_MAX_HEALTH;
   room.playerUpgrades.host.extraLives = 0;
+  room.playerUpgrades.host.damageMultiplier = 1;
+  room.playerUpgrades.host.attackSpeedMultiplier = 1;
+  room.playerUpgrades.host.moveSpeedMultiplier = 1;
+  room.playerUpgrades.host.bonusJumpCharges = 0;
   room.playerUpgrades.guest.extraLives = 0;
+  room.playerUpgrades.guest.damageMultiplier = 1;
+  room.playerUpgrades.guest.attackSpeedMultiplier = 1;
+  room.playerUpgrades.guest.moveSpeedMultiplier = 1;
+  room.playerUpgrades.guest.bonusJumpCharges = 0;
   room.lastTickAt = Date.now();
 }
 
@@ -614,7 +622,15 @@ function attachSocketHandlers(ws) {
         room.pauseCards = [];
         room.pendingWave = 0;
         room.playerUpgrades.host.extraLives = 0;
+        room.playerUpgrades.host.damageMultiplier = 1;
+        room.playerUpgrades.host.attackSpeedMultiplier = 1;
+        room.playerUpgrades.host.moveSpeedMultiplier = 1;
+        room.playerUpgrades.host.bonusJumpCharges = 0;
         room.playerUpgrades.guest.extraLives = 0;
+        room.playerUpgrades.guest.damageMultiplier = 1;
+        room.playerUpgrades.guest.attackSpeedMultiplier = 1;
+        room.playerUpgrades.guest.moveSpeedMultiplier = 1;
+        room.playerUpgrades.guest.bonusJumpCharges = 0;
         room.lastTickAt = Date.now();
         room.currentWave = 0;
         room.nextWaveAt = 0;
@@ -653,9 +669,12 @@ function attachSocketHandlers(ws) {
 
     if (message.type === "pause_choice") {
       const selectedChoice = String(message.choice || "");
+      const isKnownChoice = COOP_UPGRADE_IDS.includes(selectedChoice);
       const normalizedChoice = room.pauseCards.includes(selectedChoice)
         ? selectedChoice
-        : null;
+        : isKnownChoice
+          ? selectedChoice
+          : null;
 
       if (ws.coopRole === "host") {
         room.hostChoice = normalizedChoice;
