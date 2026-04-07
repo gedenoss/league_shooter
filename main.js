@@ -212,8 +212,8 @@ coopMenuEl.style.userSelect = "none";
 coopMenuEl.style.cursor = "auto";
 coopMenuEl.innerHTML = `
   <div style="
-    width:min(560px, calc(100vw - 28px));
-    padding:18px 16px;
+    width:min(620px, calc(100vw - 28px));
+    padding:18px 16px 16px;
     border-radius:12px;
     background:#111418;
     border:1px solid #3a3f46;
@@ -222,32 +222,84 @@ coopMenuEl.innerHTML = `
     text-align:center;
     font-family:system-ui, sans-serif;">
     <div style="font:700 16px/1 monospace; letter-spacing:1px; color:#d7d7d7; margin-bottom:8px;">CO-OP</div>
-    <div style="font:700 24px/1.05 monospace; letter-spacing:0.5px; margin-bottom:8px;">PARTIE COOP</div>
-    <div style="font:400 13px/1.4 monospace; color:#b8bcc2; margin-bottom:12px;">1) Heberge pour obtenir un code. 2) Rejoins avec un code a 6 chiffres.</div>
-    <div id="coop-status" style="font:700 14px/1.3 monospace; color:#8fd2ff; margin-bottom:12px;">Choisis une action.</div>
-    <div id="coop-code-row" style="display:none; margin-bottom:12px; font:700 26px/1 monospace; letter-spacing:4px; color:#fff;"></div>
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
-      <button id="coop-host-btn" type="button" style="padding:12px 14px; border:1px solid #58789a; border-radius:8px; background:#17314a; color:#fff; font:700 15px/1 monospace; cursor:pointer;">HEBERGER</button>
-      <button id="coop-join-btn" type="button" style="padding:12px 14px; border:1px solid #6b7b8b; border-radius:8px; background:#1a1d22; color:#fff; font:700 15px/1 monospace; cursor:pointer;">REJOINDRE</button>
+    <div style="font:700 28px/1.05 monospace; letter-spacing:0.5px; margin-bottom:8px;">PARTIE COOP</div>
+
+    <div id="coop-choice-screen" style="display:block;">
+      <div style="font:400 13px/1.4 monospace; color:#b8bcc2; margin-bottom:16px;">Choisis ton role pour la partie.</div>
+      <div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; margin-bottom:12px;">
+        <button id="coop-host-btn" type="button" style="padding:14px 16px; border:1px solid #58789a; border-radius:8px; background:#17314a; color:#fff; font:700 16px/1 monospace; cursor:pointer;">HEBERGER</button>
+        <button id="coop-join-btn" type="button" style="padding:14px 16px; border:1px solid #6b7b8b; border-radius:8px; background:#1a1d22; color:#fff; font:700 16px/1 monospace; cursor:pointer;">REJOINDRE</button>
+      </div>
+      <button id="coop-close-btn" type="button" style="padding:12px 16px; border:1px solid #4a4f57; border-radius:8px; background:#111418; color:#fff; font:700 14px/1 monospace; cursor:pointer;">FERMER</button>
     </div>
-    <div style="display:grid; grid-template-columns:1fr auto; gap:10px; align-items:center; margin-bottom:10px;">
-      <input id="coop-code-input" maxlength="6" inputmode="numeric" placeholder="CODE 6 CHIFFRES" style="width:100%; padding:12px 14px; border-radius:8px; border:1px solid #4a4f57; background:#1a1d22; color:#fff; font:700 17px/1 monospace; letter-spacing:4px; text-transform:uppercase;" />
-      <button id="coop-back-btn" type="button" style="padding:12px 14px; border:1px solid #4a4f57; border-radius:8px; background:#111418; color:#fff; font:700 13px/1 monospace; cursor:pointer;">FERMER</button>
+
+    <div id="coop-code-screen" style="display:none;">
+      <div id="coop-status" style="font:700 14px/1.2 monospace; color:#8fd2ff; margin-bottom:12px;">En attente...</div>
+      <div id="coop-code-row" style="display:none; margin-bottom:12px; font:700 26px/1 monospace; letter-spacing:4px; color:#fff;"></div>
+      <div style="display:grid; grid-template-columns:1fr auto; gap:10px; align-items:center; margin-bottom:12px;">
+        <input id="coop-code-input" maxlength="6" inputmode="numeric" placeholder="ENTRER LE CODE" style="width:100%; padding:14px 16px; border-radius:8px; border:1px solid #4a4f57; background:#1a1d22; color:#fff; font:700 18px/1 monospace; letter-spacing:4px; text-transform:uppercase;" />
+        <button id="coop-submit-btn" type="button" style="padding:14px 16px; border:1px solid #58789a; border-radius:8px; background:#17314a; color:#fff; font:700 14px/1 monospace; cursor:pointer;">VALIDER</button>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr auto; gap:10px; align-items:center; margin-bottom:12px;">
+        <div id="coop-timer" style="font:700 12px/1 monospace; letter-spacing:1.2px; color:#b6bcc7; text-align:left;">Attente joueur...</div>
+        <button id="coop-back-btn" type="button" style="padding:12px 16px; border:1px solid #4a4f57; border-radius:8px; background:#111418; color:#fff; font:700 13px/1 monospace; cursor:pointer;">RETOUR</button>
+      </div>
     </div>
-    <div id="coop-timer" style="font:700 12px/1 monospace; letter-spacing:1.2px; color:#b6bcc7;">Attente joueur...</div>
   </div>
 `;
 document.body.appendChild(coopMenuEl);
+const coopChoiceScreenEl = coopMenuEl.querySelector("#coop-choice-screen");
+const coopCodeScreenEl = coopMenuEl.querySelector("#coop-code-screen");
 const coopStatusEl = coopMenuEl.querySelector("#coop-status");
 const coopCodeRowEl = coopMenuEl.querySelector("#coop-code-row");
 const coopHostBtnEl = coopMenuEl.querySelector("#coop-host-btn");
 const coopJoinBtnEl = coopMenuEl.querySelector("#coop-join-btn");
 const coopCodeInputEl = coopMenuEl.querySelector("#coop-code-input");
+const coopSubmitBtnEl = coopMenuEl.querySelector("#coop-submit-btn");
+const coopCloseBtnEl = coopMenuEl.querySelector("#coop-close-btn");
 const coopBackBtnEl = coopMenuEl.querySelector("#coop-back-btn");
 const coopTimerEl = coopMenuEl.querySelector("#coop-timer");
+let coopMenuMode = "choice";
+
+function setCoopScreen(mode) {
+  coopMenuMode = mode;
+  if (coopChoiceScreenEl) {
+    coopChoiceScreenEl.style.display = mode === "choice" ? "block" : "none";
+  }
+  if (coopCodeScreenEl) {
+    coopCodeScreenEl.style.display = mode === "code" ? "block" : "none";
+  }
+}
+
+function submitJoinCode() {
+  coopClient.connect();
+  const code = String(coopCodeInputEl?.value || "")
+    .replace(/\D/g, "")
+    .slice(0, 6);
+  if (code.length !== 6) {
+    setCoopStatus("Entre un code a 6 chiffres valide.");
+    return;
+  }
+  setCoopStatus(`Connexion au code ${code}...`);
+  coopClient.joinRoom(code);
+}
 
 if (coopHostBtnEl) {
   coopHostBtnEl.addEventListener("click", () => {
+    setCoopScreen("code");
+    if (coopCodeInputEl) {
+      coopCodeInputEl.value = "";
+      coopCodeInputEl.disabled = true;
+      coopCodeInputEl.placeholder = "CODE GENERE AUTOMATIQUEMENT";
+    }
+    if (coopSubmitBtnEl) {
+      coopSubmitBtnEl.disabled = true;
+      coopSubmitBtnEl.textContent = "EN ATTENTE";
+    }
+    setCoopCode("");
+    if (coopTimerEl) {
+      coopTimerEl.textContent = "Attente du 2e joueur...";
+    }
     coopClient.connect();
     setCoopStatus("Generation du code. Attends...");
     coopClient.hostRoom();
@@ -256,16 +308,28 @@ if (coopHostBtnEl) {
 
 if (coopJoinBtnEl) {
   coopJoinBtnEl.addEventListener("click", () => {
-    coopClient.connect();
-    const code = String(coopCodeInputEl?.value || "")
-      .replace(/\D/g, "")
-      .slice(0, 6);
-    if (code.length !== 6) {
-      setCoopStatus("Entre un code a 6 chiffres valide.");
-      return;
+    setCoopScreen("code");
+    if (coopCodeInputEl) {
+      coopCodeInputEl.disabled = false;
+      coopCodeInputEl.placeholder = "ENTRER LE CODE";
+      coopCodeInputEl.value = "";
+      coopCodeInputEl.focus();
     }
-    setCoopStatus(`Connexion au code ${code}...`);
-    coopClient.joinRoom(code);
+    if (coopSubmitBtnEl) {
+      coopSubmitBtnEl.disabled = false;
+      coopSubmitBtnEl.textContent = "REJOINDRE";
+    }
+    setCoopCode("");
+    if (coopTimerEl) {
+      coopTimerEl.textContent = "Attente code...";
+    }
+    setCoopStatus("Entre un code puis valide.");
+  });
+}
+
+if (coopSubmitBtnEl) {
+  coopSubmitBtnEl.addEventListener("click", () => {
+    submitJoinCode();
   });
 }
 
@@ -279,14 +343,25 @@ if (coopCodeInputEl) {
   coopCodeInputEl.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
-      coopJoinBtnEl?.click();
+      submitJoinCode();
     }
+  });
+}
+
+if (coopCloseBtnEl) {
+  coopCloseBtnEl.addEventListener("click", () => {
+    closeCoopMenu();
   });
 }
 
 if (coopBackBtnEl) {
   coopBackBtnEl.addEventListener("click", () => {
-    closeCoopMenu();
+    setCoopScreen("choice");
+    setCoopStatus("Choisis une action.");
+    setCoopCode("");
+    if (coopTimerEl) {
+      coopTimerEl.textContent = "Attente joueur...";
+    }
   });
 }
 
@@ -367,17 +442,23 @@ function openCoopMenu() {
   holdShotCount = 0;
   coopClient.connect();
   showCoopMenu();
+  setCoopScreen("choice");
   if (coopHostBtnEl) {
     coopHostBtnEl.disabled = false;
   }
   if (coopJoinBtnEl) {
     coopJoinBtnEl.disabled = false;
   }
-  setCoopStatus("Choisis heberger ou rejoindre.");
+  setCoopStatus("Choisis une action.");
   setCoopCode("");
   if (coopCodeInputEl) {
+    coopCodeInputEl.disabled = false;
+    coopCodeInputEl.placeholder = "ENTRER LE CODE";
     coopCodeInputEl.value = "";
-    coopCodeInputEl.focus();
+  }
+  if (coopSubmitBtnEl) {
+    coopSubmitBtnEl.disabled = false;
+    coopSubmitBtnEl.textContent = "REJOINDRE";
   }
   if (coopTimerEl) {
     coopTimerEl.textContent = "Attente joueur...";
@@ -426,8 +507,20 @@ function handleCoopMessage(message) {
     coopState.roomCode = message.code;
     coopState.role = "host";
     coopState.waitingForGuest = true;
+    setCoopScreen("code");
     setCoopStatus("Code genere. En attente d'un autre joueur.");
     setCoopCode(message.code);
+    if (coopCodeInputEl) {
+      coopCodeInputEl.disabled = true;
+      coopCodeInputEl.placeholder = "CODE GENERE AUTOMATIQUEMENT";
+    }
+    if (coopSubmitBtnEl) {
+      coopSubmitBtnEl.disabled = true;
+      coopSubmitBtnEl.textContent = "EN ATTENTE";
+    }
+    if (coopTimerEl) {
+      coopTimerEl.textContent = "Attente du 2e joueur...";
+    }
     if (coopHostBtnEl) {
       coopHostBtnEl.disabled = true;
     }
@@ -442,8 +535,16 @@ function handleCoopMessage(message) {
     coopState.roomCode = message.code;
     coopState.role = "guest";
     coopState.pauseOpen = false;
+    setCoopScreen("code");
     setCoopStatus("Rejoint. En attente de l'hebergeur.");
     setCoopCode(message.code);
+    if (coopCodeInputEl) {
+      coopCodeInputEl.disabled = true;
+    }
+    if (coopSubmitBtnEl) {
+      coopSubmitBtnEl.disabled = true;
+      coopSubmitBtnEl.textContent = "EN ATTENTE";
+    }
     if (coopTimerEl) {
       coopTimerEl.textContent = "Attente lancement partie...";
     }
@@ -453,6 +554,8 @@ function handleCoopMessage(message) {
 
   if (message.type === "guest_joined") {
     setCoopStatus("Le second joueur est arrive. Synchronisation...");
+    // Re-ack host readiness to avoid lobby deadlocks on reconnect/race conditions.
+    coopClient.lobbyReady();
     return;
   }
 
@@ -517,6 +620,15 @@ function handleCoopMessage(message) {
   }
 
   if (message.type === "room_error") {
+    setCoopScreen("code");
+    if (coopCodeInputEl) {
+      coopCodeInputEl.disabled = false;
+      coopCodeInputEl.focus();
+    }
+    if (coopSubmitBtnEl) {
+      coopSubmitBtnEl.disabled = false;
+      coopSubmitBtnEl.textContent = "REJOINDRE";
+    }
     setCoopStatus("Code invalide ou partie indisponible.");
     return;
   }
