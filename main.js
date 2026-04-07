@@ -670,10 +670,8 @@ function handleCoopMessage(message) {
   }
 
   if (message.type === "snapshot") {
-    if (coopState.role === "guest") {
-      applyCoopSnapshot(message.snapshot);
-      coopState.lastSnapshotAt = Date.now();
-    }
+    applyCoopSnapshot(message.snapshot);
+    coopState.lastSnapshotAt = Date.now();
     return;
   }
 
@@ -726,6 +724,25 @@ function handleCoopMessage(message) {
     applyPlayerDamage(message.amount || 1);
     triggerDamageOverlay();
     updateHealthHud();
+    return;
+  }
+
+  if (message.type === "player_health") {
+    const role = String(message.role || "").toLowerCase();
+    const health = Number(message.health);
+    if (!Number.isFinite(health)) {
+      return;
+    }
+
+    if (role === coopState.role) {
+      playerHealth = Math.max(0, health);
+      updateHealthHud();
+      if (playerHealth <= 0) {
+        triggerGameOver(false);
+      }
+    } else {
+      coopState.remotePlayer.health = Math.max(0, health);
+    }
     return;
   }
 
@@ -2094,18 +2111,6 @@ function updateWaveHud() {
   wavePanelTexture.needsUpdate = true;
 }
 
-function getZombieSnapshot() {
-  return zombies.map((zombie) => ({
-    id: zombie.networkId || zombie.mesh.uuid,
-    x: zombie.mesh.position.x,
-    y: zombie.mesh.position.y,
-    z: zombie.mesh.position.z,
-    health: zombie.health,
-    variant: zombie.variant,
-    contactCooldown: zombie.contactCooldown,
-  }));
-}
-
 function getPlayerSnapshot() {
   return {
     x: player.position.x,
@@ -2233,9 +2238,22 @@ function applyCoopSnapshot(snapshot) {
     return;
   }
 
-  updateRemotePlayerProxy(snapshot.player);
+  if (snapshot.players && typeof snapshot.players === "object") {
+    const localPlayerSnapshot = snapshot.players[coopState.role];
+    if (
+      localPlayerSnapshot &&
+      Number.isFinite(Number(localPlayerSnapshot.health))
+    ) {
+      playerHealth = Math.max(0, Number(localPlayerSnapshot.health));
+      updateHealthHud();
+    }
+    const remoteRole = coopState.role === "host" ? "guest" : "host";
+    updateRemotePlayerProxy(snapshot.players[remoteRole]);
+  } else {
+    updateRemotePlayerProxy(snapshot.player);
+  }
 
-  if (coopState.role === "guest" && Array.isArray(snapshot.zombies)) {
+  if (Array.isArray(snapshot.zombies)) {
     for (const zombieSnapshot of snapshot.zombies) {
       upsertZombieFromSnapshot(zombieSnapshot);
     }
@@ -2284,11 +2302,6 @@ function sendCoopSnapshot() {
   coopClient.sendSnapshot({
     role: coopState.role,
     player: getPlayerSnapshot(),
-    zombies: coopState.role === "host" ? getZombieSnapshot() : [],
-    currentWave,
-    nextWaveTimer,
-    gameOverActive,
-    upgradeMenuActive,
   });
 }
 
@@ -2872,7 +2885,7 @@ function startWave(waveIndex) {
   currentWave = waveIndex;
   nextWaveTimer = 0;
 
-  if (coopState.active && coopState.role === "guest") {
+  if (coopState.active) {
     updateWaveHud();
     return;
   }
@@ -3286,6 +3299,10 @@ function updateZombieWaves(dt) {
     return;
   }
 
+  if (coopState.active) {
+    return;
+  }
+
   if (coopState.active && coopState.role === "guest") {
     const snapshotStaleMs = Date.now() - (coopState.lastSnapshotAt || 0);
     if (snapshotStaleMs < 1200) {
@@ -3318,11 +3335,8 @@ function updateZombies(dt) {
     return;
   }
 
-  if (coopState.active && coopState.role === "guest") {
-    const snapshotStaleMs = Date.now() - (coopState.lastSnapshotAt || 0);
-    if (snapshotStaleMs < 1200) {
-      return;
-    }
+  if (coopState.active) {
+    return;
   }
 
   for (const zombie of [...zombies]) {

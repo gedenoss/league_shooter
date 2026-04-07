@@ -4,10 +4,46 @@ const PORT = Number(process.env.PORT || 8080);
 const LOBBY_TIMEOUT_MS = 120_000;
 const PAUSE_TIMEOUT_MS = 10_000;
 const ROOM_CODE_LENGTH = 6;
+const PLAYER_MAX_HEALTH = 100;
+const SNAPSHOT_TICK_MS = 80;
+const WAVE_CLEAR_DELAY_MS = 1500;
 
 const rooms = new Map();
 const sockets = new Map();
 let nextSocketId = 1;
+let nextZombieId = 1;
+
+const ZOMBIE_VARIANTS = [
+  {
+    key: "walker",
+    speed: 2.2,
+    hpBase: 22,
+    contactDamage: 8,
+    contactRange: 1.25,
+  },
+  {
+    key: "brute",
+    speed: 1.55,
+    hpBase: 40,
+    contactDamage: 12,
+    contactRange: 1.4,
+  },
+  {
+    key: "sprinter",
+    speed: 3.3,
+    hpBase: 16,
+    contactDamage: 7,
+    contactRange: 1.1,
+  },
+];
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function randomBetween(min, max) {
+  return min + Math.random() * (max - min);
+}
 
 function createRoomCode() {
   for (let attempt = 0; attempt < 1000; attempt += 1) {
@@ -35,10 +71,203 @@ function makeRoom(code, hostSocket) {
     hostChoice: null,
     guestChoice: null,
     snapshot: null,
-    zombieHealth: new Map(),
-    deadZombieIds: new Set(),
     gameStarted: false,
+    players: {
+      host: {
+        x: -13,
+        y: 1.65,
+        z: 0,
+        yaw: 0,
+        pitch: 0,
+        health: PLAYER_MAX_HEALTH,
+        ammo: 30,
+        isReloading: false,
+        updatedAt: Date.now(),
+      },
+      guest: {
+        x: -13,
+        y: 1.65,
+        z: 0,
+        yaw: 0,
+        pitch: 0,
+        health: PLAYER_MAX_HEALTH,
+        ammo: 30,
+        isReloading: false,
+        updatedAt: Date.now(),
+      },
+    },
+    zombies: [],
+    currentWave: 0,
+    nextWaveAt: 0,
+    lastTickAt: Date.now(),
   };
+}
+
+function chooseVariant() {
+  const idx = Math.floor(Math.random() * ZOMBIE_VARIANTS.length);
+  return ZOMBIE_VARIANTS[idx];
+}
+
+function spawnWave(room, waveIndex) {
+  room.currentWave = Math.max(1, waveIndex);
+  room.zombies = [];
+  const count = room.currentWave;
+  for (let i = 0; i < count; i += 1) {
+    const variant = chooseVariant();
+    const health = variant.hpBase + Math.floor(room.currentWave * 2.5);
+    room.zombies.push({
+      id: `z${nextZombieId++}`,
+      x: randomBetween(-14.5, 14.5),
+      y: 1.1,
+      z: randomBetween(-8.8, 8.8),
+      health,
+      variant: variant.key,
+      speed: variant.speed,
+      contactDamage: variant.contactDamage,
+      contactRange: variant.contactRange,
+      contactCooldownMs: 0,
+    });
+  }
+  room.nextWaveAt = 0;
+}
+
+function getNearestPlayer(room, zombie) {
+  let bestRole = null;
+  let bestPlayer = null;
+  let bestDistSq = Number.POSITIVE_INFINITY;
+
+  for (const role of ["host", "guest"]) {
+    const player = room.players[role];
+    if (!player || player.health <= 0) {
+      continue;
+    }
+    const dx = player.x - zombie.x;
+    const dz = player.z - zombie.z;
+    const distSq = dx * dx + dz * dz;
+    if (distSq < bestDistSq) {
+      bestDistSq = distSq;
+      bestRole = role;
+      bestPlayer = player;
+    }
+  }
+
+  return {
+    role: bestRole,
+    player: bestPlayer,
+    distSq: bestDistSq,
+  };
+}
+
+function broadcastSnapshot(room) {
+  room.snapshot = {
+    players: {
+      host: room.players.host,
+      guest: room.players.guest,
+    },
+    zombies: room.zombies.map((z) => ({
+      id: z.id,
+      x: z.x,
+      y: z.y,
+      z: z.z,
+      health: z.health,
+      variant: z.variant,
+      contactCooldown: z.contactCooldownMs / 1000,
+    })),
+    currentWave: room.currentWave,
+    nextWaveTimer:
+      room.nextWaveAt > 0
+        ? Math.max(0, (room.nextWaveAt - Date.now()) / 1000)
+        : 0,
+    gameOverActive:
+      room.players.host.health <= 0 || room.players.guest.health <= 0,
+    upgradeMenuActive: false,
+    at: Date.now(),
+  };
+
+  broadcast(room, {
+    type: "snapshot",
+    snapshot: room.snapshot,
+  });
+}
+
+function applyZombieHit(room, zombieId, damage) {
+  const zombie = room.zombies.find((item) => item.id === zombieId);
+  if (!zombie) {
+    return;
+  }
+
+  zombie.health = Math.max(0, zombie.health - damage);
+  if (zombie.health <= 0) {
+    room.zombies = room.zombies.filter((item) => item.id !== zombieId);
+    broadcast(room, {
+      type: "zombie_killed",
+      zombieId,
+    });
+    return;
+  }
+
+  broadcast(room, {
+    type: "zombie_damaged",
+    zombieId,
+    health: zombie.health,
+  });
+}
+
+function tickRoom(room, now) {
+  if (!room.gameStarted) {
+    return;
+  }
+
+  const dt = Math.max(0.016, (now - room.lastTickAt) / 1000);
+  room.lastTickAt = now;
+
+  for (const zombie of room.zombies) {
+    zombie.contactCooldownMs = Math.max(
+      0,
+      zombie.contactCooldownMs - dt * 1000,
+    );
+
+    const target = getNearestPlayer(room, zombie);
+    if (!target.player || !Number.isFinite(target.distSq)) {
+      continue;
+    }
+
+    const distance = Math.sqrt(target.distSq);
+    if (distance > 0.0001) {
+      const step = zombie.speed * dt;
+      zombie.x += ((target.player.x - zombie.x) / distance) * step;
+      zombie.z += ((target.player.z - zombie.z) / distance) * step;
+      zombie.x = clamp(zombie.x, -15.2, 15.2);
+      zombie.z = clamp(zombie.z, -9.4, 9.4);
+    }
+
+    if (distance <= zombie.contactRange && zombie.contactCooldownMs <= 0) {
+      const victim = room.players[target.role];
+      victim.health = Math.max(0, victim.health - zombie.contactDamage);
+      zombie.contactCooldownMs = 700;
+
+      broadcast(room, {
+        type: "player_health",
+        role: target.role,
+        health: victim.health,
+      });
+
+      if (victim.health <= 0) {
+        broadcast(room, {
+          type: "coop_game_over",
+          by: "server",
+        });
+      }
+    }
+  }
+
+  if (room.zombies.length === 0) {
+    if (!room.nextWaveAt) {
+      room.nextWaveAt = now + WAVE_CLEAR_DELAY_MS;
+    } else if (now >= room.nextWaveAt) {
+      spawnWave(room, room.currentWave + 1);
+    }
+  }
 }
 
 function getSocketId(socket) {
@@ -59,6 +288,15 @@ function send(socket, payload) {
 function broadcast(room, payload) {
   send(room.hostSocket, payload);
   send(room.guestSocket, payload);
+}
+
+function roomHasTwoPlayers(room) {
+  return (
+    room.hostSocket &&
+    room.guestSocket &&
+    room.hostSocket.readyState === 1 &&
+    room.guestSocket.readyState === 1
+  );
 }
 
 function closeRoom(room, reason = "room_closed") {
@@ -155,6 +393,10 @@ function attachSocketHandlers(ws) {
 
       if (!room.gameStarted) {
         room.gameStarted = true;
+        room.players.host.health = PLAYER_MAX_HEALTH;
+        room.players.guest.health = PLAYER_MAX_HEALTH;
+        room.lastTickAt = Date.now();
+        spawnWave(room, 1);
       }
 
       const startAt = Date.now() + 250;
@@ -205,38 +447,20 @@ function attachSocketHandlers(ws) {
     }
 
     if (message.type === "snapshot") {
-      const inputSnapshot = message.snapshot || {};
-      const zombies = Array.isArray(inputSnapshot.zombies)
-        ? inputSnapshot.zombies
-        : [];
-
-      const reconciledZombies = [];
-      for (const zombie of zombies) {
-        const id = zombie?.id;
-        if (!id || room.deadZombieIds.has(id)) {
-          continue;
-        }
-
-        const serverHealth = room.zombieHealth.get(id);
-        const clientHealth = Number(zombie.health);
-        const health = Number.isFinite(serverHealth)
-          ? Math.min(serverHealth, clientHealth)
-          : clientHealth;
-
-        room.zombieHealth.set(id, health);
-        reconciledZombies.push({ ...zombie, health });
-      }
-
-      room.snapshot = {
-        ...inputSnapshot,
-        zombies: reconciledZombies,
-        from: ws.coopRole,
-        at: Date.now(),
-      };
-      if (ws.coopRole === "host") {
-        send(room.guestSocket, { type: "snapshot", snapshot: room.snapshot });
-      } else {
-        send(room.hostSocket, { type: "guest_state", snapshot: room.snapshot });
+      const player = message.snapshot?.player;
+      if (player && (ws.coopRole === "host" || ws.coopRole === "guest")) {
+        const role = ws.coopRole;
+        room.players[role] = {
+          ...room.players[role],
+          x: Number(player.x) || room.players[role].x,
+          y: Number(player.y) || room.players[role].y,
+          z: Number(player.z) || room.players[role].z,
+          yaw: Number(player.yaw) || 0,
+          pitch: Number(player.pitch) || 0,
+          ammo: Number(player.ammo) || room.players[role].ammo,
+          isReloading: Boolean(player.isReloading),
+          updatedAt: Date.now(),
+        };
       }
       return;
     }
@@ -244,31 +468,10 @@ function attachSocketHandlers(ws) {
     if (message.type === "zombie_hit") {
       const zombieId = String(message.zombieId || "").trim();
       const damage = Math.max(0, Number(message.damage) || 0);
-      if (!zombieId || damage <= 0 || room.deadZombieIds.has(zombieId)) {
+      if (!zombieId || damage <= 0) {
         return;
       }
-
-      const currentHealth = Number(room.zombieHealth.get(zombieId));
-      if (!Number.isFinite(currentHealth)) {
-        return;
-      }
-
-      const nextHealth = currentHealth - damage;
-      if (nextHealth <= 0) {
-        room.deadZombieIds.add(zombieId);
-        room.zombieHealth.delete(zombieId);
-        broadcast(room, {
-          type: "zombie_killed",
-          zombieId,
-        });
-      } else {
-        room.zombieHealth.set(zombieId, nextHealth);
-        broadcast(room, {
-          type: "zombie_damaged",
-          zombieId,
-          health: nextHealth,
-        });
-      }
+      applyZombieHit(room, zombieId, damage);
       return;
     }
 
@@ -282,16 +485,6 @@ function attachSocketHandlers(ws) {
         send(room.guestSocket, {
           type: "shot",
           shot: message.shot,
-        });
-      }
-      return;
-    }
-
-    if (message.type === "remote_damage") {
-      if (ws.coopRole === "host") {
-        send(room.guestSocket, {
-          type: "remote_damage",
-          amount: Number(message.amount) || 0,
         });
       }
       return;
@@ -342,6 +535,8 @@ wss.on("connection", (ws) => {
 setInterval(() => {
   const now = Date.now();
   for (const [code, room] of rooms.entries()) {
+    tickRoom(room, now);
+
     if (
       room.gameStarted &&
       room.menuOpenAt &&
@@ -359,8 +554,12 @@ setInterval(() => {
     if (now - room.createdAt > LOBBY_TIMEOUT_MS && !room.gameStarted) {
       closeRoom(room, "timeout");
     }
+
+    if (roomHasTwoPlayers(room)) {
+      broadcastSnapshot(room);
+    }
   }
-}, 1000);
+}, SNAPSHOT_TICK_MS);
 
 wss.on("error", (error) => {
   console.error("WebSocket Server Error:", error);
