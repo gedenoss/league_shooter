@@ -2647,7 +2647,14 @@ function updateCoopButtonVisual(active) {
 
 function refreshCoopButtonState() {
   const inRoom = Boolean(coopState.roomCode && coopState.role);
-  if (inRoom) {
+  const localRunActive =
+    !coopState.active &&
+    (zombieModeActive ||
+      gameOverActive ||
+      upgradeMenuActive ||
+      currentWave > 0);
+
+  if (inRoom || localRunActive) {
     updateCoopButtonVisual("disabled");
   } else {
     updateCoopButtonVisual("ready");
@@ -2919,6 +2926,7 @@ function activateZombieMode() {
   zombieModeActive = true;
   currentWave = 0;
   nextWaveTimer = 0;
+  refreshCoopButtonState();
   updateModeButtonVisual("disabled");
   openUpgradeMenu(1);
 }
@@ -2975,6 +2983,7 @@ function resetRun(preservePose = false) {
     gameOverOverlayEl.style.display = "none";
   }
   closeUpgradeMenu();
+  refreshCoopButtonState();
   updateAmmoHud();
   updateHealthHud();
   updateWaveHud();
@@ -2994,6 +3003,8 @@ function triggerGameOver(notifyServer = true) {
   if (gameOverOverlayEl) {
     gameOverOverlayEl.style.display = "block";
   }
+
+  refreshCoopButtonState();
 
   if (notifyServer && coopState.active && coopClient.isConnected()) {
     coopClient.sendGameOver();
@@ -3660,15 +3671,12 @@ function animate() {
   updateAmmoHud();
 
   if (gameOverActive) {
-    if (coopState.active) {
-      updateShootingStars(dt);
-      renderer.render(scene, camera);
-      return;
-    }
-
     gameOverTimer -= dt;
     if (gameOverTimer <= 0) {
-      resetRun();
+      resetRun(coopState.active);
+      if (coopState.active) {
+        setCoopStatus("Clique le bouton zombie pour relancer une partie.");
+      }
     }
     updateShootingStars(dt);
     renderer.render(scene, camera);

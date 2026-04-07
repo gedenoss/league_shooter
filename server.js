@@ -238,6 +238,22 @@ function applyZombieHit(room, zombieId, damage) {
   });
 }
 
+function endRoomRound(room) {
+  room.gameStarted = false;
+  room.gameOver = false;
+  room.zombies = [];
+  room.currentWave = 0;
+  room.nextWaveAt = 0;
+  room.pendingWave = 0;
+  room.menuOpenAt = null;
+  room.menuDeadlineAt = null;
+  room.hostChoice = null;
+  room.guestChoice = null;
+  room.players.host.health = PLAYER_MAX_HEALTH;
+  room.players.guest.health = PLAYER_MAX_HEALTH;
+  room.lastTickAt = Date.now();
+}
+
 function tickRoom(room, now) {
   if (!room.gameStarted || room.gameOver) {
     return;
@@ -287,6 +303,7 @@ function tickRoom(room, now) {
           type: "coop_game_over",
           by: "server",
         });
+        endRoomRound(room);
         break;
       }
     }
@@ -565,6 +582,7 @@ function attachSocketHandlers(ws) {
         type: "coop_game_over",
         by: ws.coopRole || "unknown",
       });
+      endRoomRound(room);
       return;
     }
 
