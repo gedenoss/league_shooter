@@ -225,12 +225,14 @@ upgradeMenuEl.innerHTML = `
     font-family:system-ui, sans-serif;">
     <div style="font:700 16px/1 monospace; letter-spacing:1px; color:#d7d7d7; margin-bottom:8px;">PAUSE</div>
     <div style="font:700 28px/1.05 monospace; letter-spacing:0.5px; margin-bottom:8px;">CHOISIS UNE CARTE</div>
+    <div id="upgrade-coop-timer" style="display:none; font:700 14px/1 monospace; color:#9dc8ff; margin-bottom:8px;">Temps: 10.0s</div>
     <div style="font:400 13px/1.4 monospace; color:#b8bcc2; margin-bottom:16px;">Le jeu est arrete. Selectionne un boost pour continuer.</div>
     <div id="upgrade-card-grid" style="display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:12px;"></div>
   </div>
 `;
 document.body.appendChild(upgradeMenuEl);
 const upgradeCardGridEl = upgradeMenuEl.querySelector("#upgrade-card-grid");
+const upgradeCoopTimerEl = upgradeMenuEl.querySelector("#upgrade-coop-timer");
 
 const coopMenuEl = document.createElement("div");
 coopMenuEl.style.position = "fixed";
@@ -493,6 +495,14 @@ function setCoopCode(code) {
 }
 
 function setCoopTimer(seconds) {
+  if (upgradeCoopTimerEl) {
+    const shouldShow = coopState.active && upgradeMenuActive;
+    upgradeCoopTimerEl.style.display = shouldShow ? "block" : "none";
+    if (shouldShow) {
+      upgradeCoopTimerEl.textContent = `Temps: ${seconds.toFixed(1)}s`;
+    }
+  }
+
   if (coopTimerEl) {
     coopTimerEl.textContent = `Pause: ${seconds.toFixed(1)}s`;
   }
@@ -748,7 +758,11 @@ function handleCoopMessage(message) {
     }
 
     if (role === coopState.role) {
+      const previousHealth = playerHealth;
       playerHealth = Math.max(0, health);
+      if (playerHealth < previousHealth) {
+        triggerDamageOverlay();
+      }
       updateHealthHud();
       if (playerHealth <= 0) {
         triggerGameOver(false);
@@ -1089,35 +1103,35 @@ const remotePlayerEyeLeft = new Mesh(
   new SphereGeometry(0.03, 10, 8),
   new MeshBasicMaterial({ color: 0x111111 }),
 );
-remotePlayerEyeLeft.position.set(-0.08, 0.99, 0.2);
+remotePlayerEyeLeft.position.set(-0.08, 0.99, -0.2);
 remotePlayerProxy.add(remotePlayerEyeLeft);
 
 const remotePlayerEyeRight = new Mesh(
   new SphereGeometry(0.03, 10, 8),
   new MeshBasicMaterial({ color: 0x111111 }),
 );
-remotePlayerEyeRight.position.set(0.08, 0.99, 0.2);
+remotePlayerEyeRight.position.set(0.08, 0.99, -0.2);
 remotePlayerProxy.add(remotePlayerEyeRight);
 
 const remotePlayerSmileMid = new Mesh(
   new SphereGeometry(0.022, 10, 8),
   new MeshBasicMaterial({ color: 0x111111 }),
 );
-remotePlayerSmileMid.position.set(0, 0.88, 0.205);
+remotePlayerSmileMid.position.set(0, 0.88, -0.205);
 remotePlayerProxy.add(remotePlayerSmileMid);
 
 const remotePlayerSmileLeft = new Mesh(
   new SphereGeometry(0.018, 10, 8),
   new MeshBasicMaterial({ color: 0x111111 }),
 );
-remotePlayerSmileLeft.position.set(-0.055, 0.9, 0.2);
+remotePlayerSmileLeft.position.set(-0.055, 0.9, -0.2);
 remotePlayerProxy.add(remotePlayerSmileLeft);
 
 const remotePlayerSmileRight = new Mesh(
   new SphereGeometry(0.018, 10, 8),
   new MeshBasicMaterial({ color: 0x111111 }),
 );
-remotePlayerSmileRight.position.set(0.055, 0.9, 0.2);
+remotePlayerSmileRight.position.set(0.055, 0.9, -0.2);
 remotePlayerProxy.add(remotePlayerSmileRight);
 
 const REMOTE_PLAYER_BODY_HALF_HEIGHT = 0.65;
@@ -1257,6 +1271,7 @@ const ZOMBIE_HP = 5;
 const ZOMBIE_DAMAGE = 9;
 const ZOMBIE_CONTACT_RANGE = 1.1;
 const ZOMBIE_CONTACT_COOLDOWN = 0.55;
+const ZOMBIE_PLAYER_MIN_SEPARATION = 0.78;
 const ZOMBIE_BASE_SPEED = 2.05;
 const ZOMBIE_SPEED_PER_WAVE = 0.12;
 const ZOMBIE_SPECIAL_CHANCE = 0.2;
@@ -2454,7 +2469,11 @@ function openUpgradeMenu(
   renderUpgradeMenu(cards, currentWave);
   upgradeMenuEl.style.display = "flex";
   updateWaveHud();
-  setCoopTimer(10);
+  if (coopState.active) {
+    setCoopTimer(10);
+  } else if (upgradeCoopTimerEl) {
+    upgradeCoopTimerEl.style.display = "none";
+  }
 }
 
 function closeUpgradeMenu() {
@@ -2462,6 +2481,9 @@ function closeUpgradeMenu() {
   coopState.selectedCardId = null;
   pendingWaveToStart = 0;
   upgradeMenuEl.style.display = "none";
+  if (upgradeCoopTimerEl) {
+    upgradeCoopTimerEl.style.display = "none";
+  }
   updateWaveHud();
 }
 
@@ -2941,7 +2963,7 @@ function activateZombieMode() {
     return;
   }
 
-  if (coopState.roomCode && coopState.role && !coopState.active) {
+  if (isCoopRoomLinked()) {
     if (coopState.waitingForGuest) {
       setCoopStatus("Attente du 2e joueur pour lancer la coop.");
       return;
@@ -3327,8 +3349,39 @@ function updateZombie(zombie, dt) {
     );
   }
 
+  const separationFromTarget = new Vector3(
+    zombie.mesh.position.x - primaryTarget.x,
+    0,
+    zombie.mesh.position.z - primaryTarget.z,
+  );
+  const separationDistance = separationFromTarget.length();
+  const minSeparation = Math.max(
+    ZOMBIE_PLAYER_MIN_SEPARATION,
+    zombie.contactRange * 0.7,
+  );
+  if (separationDistance > 0.0001 && separationDistance < minSeparation) {
+    separationFromTarget.normalize().multiplyScalar(minSeparation);
+    zombie.mesh.position.x = primaryTarget.x + separationFromTarget.x;
+    zombie.mesh.position.z = primaryTarget.z + separationFromTarget.z;
+  }
+
+  const targetProbe = new Vector3(
+    primaryTarget.x,
+    FLOOR_Y + zombie.centerY,
+    primaryTarget.z,
+  );
+  const canReachTarget = isNavSegmentWalkable(
+    zombie.mesh.position,
+    targetProbe,
+  );
+
   zombie.contactCooldown = Math.max(0, zombie.contactCooldown - dt);
-  if (playerDistance <= zombie.contactRange && zombie.contactCooldown <= 0) {
+  const contactDistance = zombie.mesh.position.distanceTo(targetProbe);
+  if (
+    canReachTarget &&
+    contactDistance <= zombie.contactRange &&
+    zombie.contactCooldown <= 0
+  ) {
     if (
       primaryTarget.isRemote &&
       coopState.active &&

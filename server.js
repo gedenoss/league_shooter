@@ -7,6 +7,7 @@ const ROOM_CODE_LENGTH = 6;
 const PLAYER_MAX_HEALTH = 100;
 const SNAPSHOT_TICK_MS = 80;
 const WAVE_CLEAR_DELAY_MS = 1500;
+const ZOMBIE_PLAYER_MIN_SEPARATION = 0.78;
 const ZOMBIE_BASE_SPEED = 2.05;
 const ZOMBIE_SPEED_PER_WAVE = 0.12;
 const ZOMBIE_SPECIAL_CHANCE = 0.2;
@@ -199,6 +200,23 @@ function resolvePause(room, now) {
   }
 }
 
+function openPauseForWave(room, nextWave, now) {
+  room.pendingWave = Math.max(1, Number(nextWave) || 1);
+  room.menuOpenAt = now;
+  room.menuDeadlineAt = now + PAUSE_TIMEOUT_MS;
+  room.hostChoice = null;
+  room.guestChoice = null;
+  room.pauseCards = pickPauseCards();
+
+  broadcast(room, {
+    type: "pause_open",
+    deadlineMs: PAUSE_TIMEOUT_MS,
+    deadlineAt: room.menuDeadlineAt,
+    nextWave: room.pendingWave,
+    cards: room.pauseCards,
+  });
+}
+
 function toFiniteNumber(value, fallback) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -384,7 +402,30 @@ function tickRoom(room, now) {
       zombie.z = clamp(zombie.z, -9.4, 9.4);
     }
 
-    if (distance <= zombie.contactRange && zombie.contactCooldownMs <= 0) {
+    const sepX = zombie.x - target.player.x;
+    const sepZ = zombie.z - target.player.z;
+    const separationDistance = Math.hypot(sepX, sepZ);
+    const minSeparation = Math.max(
+      ZOMBIE_PLAYER_MIN_SEPARATION,
+      zombie.contactRange * 0.7,
+    );
+    if (separationDistance > 0.0001 && separationDistance < minSeparation) {
+      const inv = 1 / separationDistance;
+      zombie.x = target.player.x + sepX * inv * minSeparation;
+      zombie.z = target.player.z + sepZ * inv * minSeparation;
+      zombie.x = clamp(zombie.x, -15.2, 15.2);
+      zombie.z = clamp(zombie.z, -9.4, 9.4);
+    }
+
+    const contactDistance = Math.hypot(
+      zombie.x - target.player.x,
+      zombie.z - target.player.z,
+    );
+
+    if (
+      contactDistance <= zombie.contactRange &&
+      zombie.contactCooldownMs <= 0
+    ) {
       const victim = room.players[target.role];
       victim.health = Math.max(0, victim.health - zombie.contactDamage);
       zombie.contactCooldownMs = 700;
@@ -423,19 +464,7 @@ function tickRoom(room, now) {
       room.nextWaveAt = 0;
 
       if (nextWave % 5 === 0) {
-        room.pendingWave = nextWave;
-        room.menuOpenAt = now;
-        room.menuDeadlineAt = now + PAUSE_TIMEOUT_MS;
-        room.hostChoice = null;
-        room.guestChoice = null;
-        room.pauseCards = pickPauseCards();
-        broadcast(room, {
-          type: "pause_open",
-          deadlineMs: PAUSE_TIMEOUT_MS,
-          deadlineAt: room.menuDeadlineAt,
-          nextWave,
-          cards: room.pauseCards,
-        });
+        openPauseForWave(room, nextWave, now);
       } else {
         spawnWave(room, nextWave);
       }
@@ -582,7 +611,9 @@ function attachSocketHandlers(ws) {
         room.playerUpgrades.host.extraLives = 0;
         room.playerUpgrades.guest.extraLives = 0;
         room.lastTickAt = Date.now();
-        spawnWave(room, 1);
+        room.currentWave = 0;
+        room.nextWaveAt = 0;
+        room.zombies = [];
       }
 
       const startAt = Date.now() + 250;
@@ -591,6 +622,7 @@ function attachSocketHandlers(ws) {
         startAt,
         roomCode: room.code,
       });
+      openPauseForWave(room, 1, Date.now());
       return;
     }
 
