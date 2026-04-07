@@ -135,5 +135,8 @@ export function createCoopClient({ url, onMessage, onOpen, onClose, onError }) {
     getSocket() {
       return socket;
     },
+    getUrl() {
+      return url;
+    },
   };
 }

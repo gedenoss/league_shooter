@@ -206,9 +206,10 @@ coopMenuEl.style.display = "none";
 coopMenuEl.style.alignItems = "center";
 coopMenuEl.style.justifyContent = "center";
 coopMenuEl.style.zIndex = "60";
-coopMenuEl.style.background = "rgba(8, 10, 14, 0.9)";
+coopMenuEl.style.background = "rgba(8, 10, 14, 0.95)";
 coopMenuEl.style.pointerEvents = "auto";
 coopMenuEl.style.userSelect = "none";
+coopMenuEl.style.cursor = "auto";
 coopMenuEl.innerHTML = `
   <div style="
     width:min(920px, calc(100vw - 28px));
@@ -247,8 +248,9 @@ const coopTimerEl = coopMenuEl.querySelector("#coop-timer");
 
 if (coopHostBtnEl) {
   coopHostBtnEl.addEventListener("click", () => {
+    console.log("[COOP] Bouton HOST clique, appel hostRoom...");
+    setCoopStatus("Generation du code. Attends...");
     coopClient.hostRoom();
-    setCoopStatus("Generation du code de partie...");
   });
 }
 
@@ -257,12 +259,20 @@ if (coopJoinBtnEl) {
     const code = String(coopCodeInputEl?.value || "")
       .replace(/\D/g, "")
       .slice(0, 6);
+    console.log(
+      "[COOP] Bouton JOIN clique, code:",
+      code,
+      "length:",
+      code.length,
+    );
     if (code.length !== 6) {
-      setCoopStatus("Entre un code a 6 chiffres.");
+      console.warn("[COOP] Code invalide, longueur:", code.length);
+      setCoopStatus("Entre un code a 6 chiffres valide.");
       return;
     }
-    coopClient.joinRoom(code);
+    console.log("[COOP] Appel joinRoom avec code:", code);
     setCoopStatus(`Connexion au code ${code}...`);
+    coopClient.joinRoom(code);
   });
 }
 
@@ -1245,7 +1255,7 @@ modeButtonMesh.userData.isZombieModeButton = true;
 modeButtonMesh.userData.isDisabled = false;
 shootTargets.push(modeButtonMesh);
 
-coopButtonMesh = createBox(0.12, 1.25, 1.25, 15.08, 1.85, 0, 0x24435f, false, {
+coopButtonMesh = createBox(0.12, 1.25, 1.25, 16.0, 1.85, 0, 0x24435f, false, {
   roughness: 0.45,
   metalness: 0.08,
 });
@@ -1253,7 +1263,7 @@ const coopButtonPlate = createBox(
   0.06,
   1.65,
   1.65,
-  15.01,
+  16.0,
   1.85,
   0,
   0xebf1f7,
@@ -1302,7 +1312,7 @@ coopButtonPlate.material.color.set(0xebf1f7);
 coopButtonPlate.material.emissive.set(0x1d2430);
 coopButtonPlate.material.emissiveIntensity = 0.18;
 coopButtonMesh.material.color.set(0x24435f);
-coopButtonMesh.position.set(16.32, 1.85, 0);
+coopButtonMesh.position.set(16.0, 1.85, 0);
 coopButtonMesh.material.emissive.set(0x12263a);
 coopButtonMesh.material.emissiveIntensity = 1.1;
 coopButtonMesh.userData.isCoopModeButton = true;
@@ -1390,10 +1400,12 @@ const coopClient = createCoopClient({
     import.meta.env.VITE_COOP_SERVER_URL ||
     `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.hostname || "localhost"}:8080`,
   onOpen() {
+    console.log("[COOP] CLIENT: WebSocket connecté au serveur.");
     setCoopStatus("Connecte au serveur coop.");
     coopState.connected = true;
   },
   onClose() {
+    console.log("[COOP] CLIENT: WebSocket fermé.");
     coopState.connected = false;
     coopState.active = false;
     coopState.role = null;
@@ -1401,12 +1413,20 @@ const coopClient = createCoopClient({
     hideCoopMenu();
   },
   onError() {
+    console.error("[COOP] CLIENT: Erreur WebSocket.");
     setCoopStatus("Erreur de connexion coop.");
   },
   onMessage(message) {
     handleCoopMessage(message);
   },
 });
+
+console.log("[COOP] Initialisation client COOP");
+console.log(
+  "[COOP] VITE_COOP_SERVER_URL env var:",
+  import.meta.env.VITE_COOP_SERVER_URL,
+);
+console.log("[COOP] WebSocket URL connectant à:", coopClient.getUrl() || "??");
 
 function ensureAudioContext() {
   if (audioContext) {
