@@ -120,6 +120,12 @@ export function createCoopClient({ url, onMessage, onOpen, onClose, onError }) {
     sendShot(shot) {
       return send("shot", { shot });
     },
+    sendPlayerHit(targetRole, damage) {
+      return send("player_hit", { targetRole, damage });
+    },
+    sendReplayReady() {
+      return send("replay_ready");
+    },
     sendZombieHit(zombieId, damage) {
       return send("zombie_hit", { zombieId, damage });
     },

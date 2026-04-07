@@ -204,6 +204,41 @@ const coopRoomLabelEl = document.getElementById("coop-room-label");
 const coopLeaveRoomBtnEl = document.getElementById("coop-leave-room-btn");
 const reloadOverlayEl = document.getElementById("reload-overlay");
 const gameOverOverlayEl = document.getElementById("gameover-overlay");
+const duelOverlayEl = document.createElement("div");
+duelOverlayEl.style.position = "fixed";
+duelOverlayEl.style.inset = "0";
+duelOverlayEl.style.display = "none";
+duelOverlayEl.style.alignItems = "center";
+duelOverlayEl.style.justifyContent = "center";
+duelOverlayEl.style.zIndex = "75";
+duelOverlayEl.style.background = "rgba(8, 10, 14, 0.9)";
+duelOverlayEl.innerHTML = `
+  <div style="
+    width:min(520px, calc(100vw - 28px));
+    padding:18px 16px;
+    border-radius:12px;
+    background:#111418;
+    border:1px solid #3a3f46;
+    box-shadow:0 14px 28px rgba(0,0,0,0.35);
+    color:#f1f1f1;
+    text-align:center;
+    font-family:system-ui, sans-serif;">
+    <div style="font:700 14px/1 monospace; letter-spacing:1px; color:#d7d7d7; margin-bottom:10px;">DUEL TERMINE</div>
+    <div id="duel-result-title" style="font:700 28px/1.05 monospace; margin-bottom:10px;">RESULTAT</div>
+    <div id="duel-result-score" style="font:700 14px/1.3 monospace; color:#b8bcc2; margin-bottom:16px;">-</div>
+    <div id="duel-replay-status" style="font:600 12px/1.3 monospace; color:#9dc8ff; margin-bottom:14px;">En attente...</div>
+    <div style="display:flex; gap:10px; justify-content:center;">
+      <button id="duel-play-again-btn" type="button" style="padding:12px 14px; border:1px solid #58789a; border-radius:8px; background:#17314a; color:#fff; font:700 13px/1 monospace; cursor:pointer;">PLAY AGAIN</button>
+      <button id="duel-exit-room-btn" type="button" style="padding:12px 14px; border:1px solid #4a4f57; border-radius:8px; background:#111418; color:#fff; font:700 13px/1 monospace; cursor:pointer;">EXIT ROOM</button>
+    </div>
+  </div>
+`;
+document.body.appendChild(duelOverlayEl);
+const duelResultTitleEl = duelOverlayEl.querySelector("#duel-result-title");
+const duelResultScoreEl = duelOverlayEl.querySelector("#duel-result-score");
+const duelReplayStatusEl = duelOverlayEl.querySelector("#duel-replay-status");
+const duelPlayAgainBtnEl = duelOverlayEl.querySelector("#duel-play-again-btn");
+const duelExitRoomBtnEl = duelOverlayEl.querySelector("#duel-exit-room-btn");
 const upgradeMenuEl = document.createElement("div");
 upgradeMenuEl.style.position = "fixed";
 upgradeMenuEl.style.inset = "0";
@@ -419,6 +454,28 @@ if (coopLeaveRoomBtnEl) {
   });
 }
 
+if (duelPlayAgainBtnEl) {
+  duelPlayAgainBtnEl.addEventListener("click", () => {
+    if (!isCoopRoomLinked()) {
+      return;
+    }
+    duelPlayAgainBtnEl.disabled = true;
+    duelPlayAgainBtnEl.textContent = "ENVOYE";
+    if (duelReplayStatusEl) {
+      duelReplayStatusEl.textContent =
+        "Vote envoye. En attente de l'autre joueur...";
+    }
+    coopClient.sendReplayReady();
+  });
+}
+
+if (duelExitRoomBtnEl) {
+  duelExitRoomBtnEl.addEventListener("click", () => {
+    leaveCoopRoom();
+    hideDuelOverlay();
+  });
+}
+
 function makePatternTexture(width, height, drawFn) {
   const canvas = document.createElement("canvas");
   canvas.width = width;
@@ -482,10 +539,12 @@ function isCoopRoomLinked() {
 function leaveCoopRoom() {
   coopClient.disconnectRoom();
   coopState.active = false;
+  coopState.mode = "none";
   coopState.role = null;
   coopState.roomCode = "";
   coopState.waitingForGuest = false;
   coopState.pauseOpen = false;
+  hideDuelOverlay();
   updateCoopRoomHud();
   refreshCoopButtonState();
   resetRun();
@@ -580,6 +639,7 @@ function closeCoopMenu() {
 
 function enableCoopMode(role, roomCode) {
   coopState.active = true;
+  coopState.mode = "coop";
   coopState.role = role;
   coopState.roomCode = roomCode || coopState.roomCode;
   coopState.waitingForGuest = false;
@@ -598,6 +658,62 @@ function enableCoopMode(role, roomCode) {
   updateModeButtonVisual("disabled");
   updateCoopButtonVisual("active");
   startWave(1);
+}
+
+function applyDuelState(state) {
+  if (!state || !state.players || !coopState.role) {
+    return;
+  }
+
+  coopState.duel.roundsPlayed = Number(state.roundsPlayed) || 0;
+  coopState.duel.maxRounds = Number(state.maxRounds) || 5;
+  coopState.duel.hostDeaths = Number(state.players.host?.deaths) || 0;
+  coopState.duel.guestDeaths = Number(state.players.guest?.deaths) || 0;
+
+  const me = state.players[coopState.role];
+  const otherRole = getOpponentRole();
+  const enemy = otherRole ? state.players[otherRole] : null;
+
+  if (me) {
+    player.position.set(
+      me.x ?? player.position.x,
+      me.y ?? player.position.y,
+      me.z ?? player.position.z,
+    );
+    yaw = Number.isFinite(Number(me.yaw)) ? Number(me.yaw) : yaw;
+    pitch = Number.isFinite(Number(me.pitch)) ? Number(me.pitch) : pitch;
+    player.rotation.y = yaw;
+    camera.rotation.x = pitch;
+    playerHealth = Number.isFinite(Number(me.health))
+      ? Math.max(0, Number(me.health))
+      : playerHealth;
+    updateHealthHud();
+  }
+
+  if (enemy) {
+    updateRemotePlayerProxy(enemy);
+    coopState.remotePlayer.health = Number.isFinite(Number(enemy.health))
+      ? Math.max(0, Number(enemy.health))
+      : coopState.remotePlayer.health;
+  }
+}
+
+function enableDuelMode(roomCode) {
+  coopState.active = true;
+  coopState.mode = "duel";
+  coopState.roomCode = roomCode || coopState.roomCode;
+  coopState.pauseOpen = false;
+  coopState.selectedCardId = null;
+  hideUpgradeMenu();
+  hideDuelOverlay();
+  gameOverActive = false;
+  gameOverOverlayEl.style.display = "none";
+  zombieModeActive = false;
+  clearZombies();
+  updateModeButtonVisual("disabled");
+  updateCoopButtonVisual("active");
+  refreshCoopButtonState();
+  updateCoopRoomHud();
 }
 
 function handleCoopMessage(message) {
@@ -652,7 +768,7 @@ function handleCoopMessage(message) {
     refreshCoopButtonState();
     setCoopScreen("code");
     setCoopHostView(true);
-    setCoopStatus("Connecte. Clique le bouton zombie pour lancer les vagues.");
+    setCoopStatus("Connecte. Duel 1v1 en attente du lancement automatique.");
     setCoopCode(message.code);
     if (coopCodeInputEl) {
       coopCodeInputEl.disabled = true;
@@ -662,7 +778,7 @@ function handleCoopMessage(message) {
       coopSubmitBtnEl.textContent = "EN ATTENTE";
     }
     if (coopTimerEl) {
-      coopTimerEl.textContent = "Pret a lancer.";
+      coopTimerEl.textContent = "Pret pour le duel.";
     }
     closeCoopMenu();
     return;
@@ -670,10 +786,74 @@ function handleCoopMessage(message) {
 
   if (message.type === "guest_joined") {
     coopState.waitingForGuest = false;
-    setCoopStatus(
-      "Ami connecte. Clique le bouton zombie pour lancer les vagues.",
-    );
+    setCoopStatus("Ami connecte. Le duel va commencer.");
     closeCoopMenu();
+    return;
+  }
+
+  if (message.type === "duel_match_start") {
+    enableDuelMode(message.state?.roomCode || coopState.roomCode);
+    applyDuelState(message.state);
+    setCoopStatus("Duel en 5 manches lance.");
+    return;
+  }
+
+  if (message.type === "duel_round_start") {
+    enableDuelMode(message.state?.roomCode || coopState.roomCode);
+    applyDuelState(message.state);
+    setCoopStatus(
+      `Manche ${Number(message.state?.roundsPlayed || 0) + 1}/5 en cours.`,
+    );
+    return;
+  }
+
+  if (message.type === "duel_state") {
+    applyDuelState(message.state);
+    return;
+  }
+
+  if (message.type === "duel_round_over") {
+    const meDied = message.victim === coopState.role;
+    setCoopStatus(meDied ? "Tu as perdu la manche." : "Tu as gagne la manche.");
+    return;
+  }
+
+  if (message.type === "duel_match_over") {
+    const hostDeaths = Number(message.hostDeaths) || 0;
+    const guestDeaths = Number(message.guestDeaths) || 0;
+    const myDeaths = coopState.role === "host" ? hostDeaths : guestDeaths;
+    const enemyDeaths = coopState.role === "host" ? guestDeaths : hostDeaths;
+    let title = "MATCH NUL";
+    if (myDeaths < enemyDeaths) {
+      title = "VICTOIRE";
+    } else if (myDeaths > enemyDeaths) {
+      title = "DEFAITE";
+    }
+    showDuelOverlay(
+      title,
+      `Tes morts: ${myDeaths} | Adversaire: ${enemyDeaths}`,
+    );
+    setCoopStatus("Match termine. Vote Play Again ou quitte la room.");
+    return;
+  }
+
+  if (message.type === "duel_replay_status") {
+    if (duelReplayStatusEl) {
+      const meReady =
+        coopState.role === "host" ? message.hostReady : message.guestReady;
+      const enemyReady =
+        coopState.role === "host" ? message.guestReady : message.hostReady;
+      duelReplayStatusEl.textContent = meReady
+        ? enemyReady
+          ? "Les 2 joueurs sont prets. Relance..."
+          : "Ton vote est enregistre. Attente adversaire..."
+        : "En attente de ton vote...";
+    }
+    return;
+  }
+
+  if (message.type === "duel_shot") {
+    applyRemoteShot(message.shot);
     return;
   }
 
@@ -795,7 +975,7 @@ function handleCoopMessage(message) {
         triggerDamageOverlay();
       }
       updateHealthHud();
-      if (playerHealth <= 0) {
+      if (playerHealth <= 0 && coopState.mode !== "duel") {
         triggerGameOver(false);
       }
     } else {
@@ -836,6 +1016,7 @@ function handleCoopMessage(message) {
 
   if (message.type === "room_closed") {
     coopState.active = false;
+    coopState.mode = "none";
     coopState.role = null;
     coopState.roomCode = "";
     coopState.waitingForGuest = false;
@@ -849,6 +1030,7 @@ function handleCoopMessage(message) {
     if (coopJoinBtnEl) {
       coopJoinBtnEl.disabled = false;
     }
+    hideDuelOverlay();
     refreshCoopButtonState();
     return;
   }
@@ -1119,6 +1301,7 @@ const remotePlayerHead = new Mesh(
   }),
 );
 remotePlayerHead.position.set(0, 0.95, 0);
+remotePlayerHead.userData.isRemoteHead = true;
 remotePlayerProxy.add(remotePlayerHead);
 
 const remotePlayerChestMark = new Mesh(
@@ -1164,6 +1347,43 @@ const remotePlayerSmileRight = new Mesh(
 );
 remotePlayerSmileRight.position.set(0.055, 0.9, -0.2);
 remotePlayerProxy.add(remotePlayerSmileRight);
+
+const remoteGun = new Mesh(
+  new BoxGeometry(0.34, 0.12, 0.48),
+  new MeshStandardMaterial({
+    color: 0x2e2f34,
+    roughness: 0.38,
+    metalness: 0.55,
+  }),
+);
+remoteGun.position.set(0.25, 0.32, -0.24);
+remotePlayerProxy.add(remoteGun);
+
+const remoteMuzzleFlash = new Mesh(
+  new SphereGeometry(0.04, 8, 8),
+  new MeshBasicMaterial({
+    color: 0xffd38a,
+    transparent: true,
+    opacity: 0,
+  }),
+);
+remoteMuzzleFlash.position.set(0.19, 0, -0.28);
+remoteGun.add(remoteMuzzleFlash);
+let remoteMuzzleFlashTimeout = null;
+
+function triggerRemoteMuzzleFlash() {
+  if (!remoteMuzzleFlash) {
+    return;
+  }
+  remoteMuzzleFlash.material.opacity = 1;
+  if (remoteMuzzleFlashTimeout) {
+    clearTimeout(remoteMuzzleFlashTimeout);
+  }
+  remoteMuzzleFlashTimeout = setTimeout(() => {
+    remoteMuzzleFlash.material.opacity = 0;
+    remoteMuzzleFlashTimeout = null;
+  }, 55);
+}
 
 const REMOTE_PLAYER_BODY_HALF_HEIGHT = 0.65;
 
@@ -1769,6 +1989,7 @@ let damageOverlayTimeout = null;
 
 const coopState = {
   active: false,
+  mode: "none",
   role: null,
   roomCode: "",
   connected: false,
@@ -1790,7 +2011,44 @@ const coopState = {
   lastSentAt: 0,
   pendingStartAt: 0,
   hostSeed: 0,
+  duel: {
+    roundsPlayed: 0,
+    maxRounds: 5,
+    hostDeaths: 0,
+    guestDeaths: 0,
+  },
 };
+
+function getOpponentRole() {
+  if (coopState.role === "host") {
+    return "guest";
+  }
+  if (coopState.role === "guest") {
+    return "host";
+  }
+  return null;
+}
+
+function hideDuelOverlay() {
+  duelOverlayEl.style.display = "none";
+  if (duelPlayAgainBtnEl) {
+    duelPlayAgainBtnEl.disabled = false;
+    duelPlayAgainBtnEl.textContent = "PLAY AGAIN";
+  }
+}
+
+function showDuelOverlay(title, scoreText) {
+  if (duelResultTitleEl) {
+    duelResultTitleEl.textContent = title;
+  }
+  if (duelResultScoreEl) {
+    duelResultScoreEl.textContent = scoreText;
+  }
+  if (duelReplayStatusEl) {
+    duelReplayStatusEl.textContent = "En attente des 2 joueurs...";
+  }
+  duelOverlayEl.style.display = "flex";
+}
 
 const coopClient = createCoopClient({
   url:
@@ -1805,6 +2063,7 @@ const coopClient = createCoopClient({
     console.log("[COOP] CLIENT: WebSocket fermé.");
     coopState.connected = false;
     coopState.active = false;
+    coopState.mode = "none";
     coopState.role = null;
     coopState.roomCode = "";
     coopState.waitingForGuest = false;
@@ -1812,6 +2071,7 @@ const coopClient = createCoopClient({
     refreshCoopButtonState();
     setCoopStatus("Connexion coop fermee.");
     hideCoopMenu();
+    hideDuelOverlay();
   },
   onError() {
     console.error("[COOP] CLIENT: Erreur WebSocket.");
@@ -3011,12 +3271,17 @@ function activateZombieMode() {
   }
 
   if (isCoopRoomLinked()) {
-    if (coopState.waitingForGuest) {
-      setCoopStatus("Attente du 2e joueur pour lancer la coop.");
+    if (coopState.active && coopState.mode === "duel") {
+      setCoopStatus("Duel deja actif dans la room.");
       return;
     }
 
-    setCoopStatus("Demarrage des vagues en coop...");
+    if (coopState.waitingForGuest) {
+      setCoopStatus("Attente du 2e joueur pour lancer le duel.");
+      return;
+    }
+
+    setCoopStatus("Demarrage du duel...");
     coopClient.requestStart();
     return;
   }
@@ -3517,6 +3782,7 @@ function collidesAt(pos) {
 
 function shoot(spreadX = 0, spreadY = 0) {
   const origin = new Vector3();
+  const impactPoint = new Vector3();
   playShotSound();
   triggerMuzzleFlash();
   getCrosshairAimNdc(aimFromCrosshairNdc);
@@ -3525,6 +3791,40 @@ function shoot(spreadX = 0, spreadY = 0) {
   raycaster.setFromCamera(shotAimNdc, camera);
   origin.copy(raycaster.ray.origin);
   muzzleAnchor.getWorldPosition(muzzleWorld);
+
+  if (coopState.active && coopState.mode === "duel") {
+    const opponentHits = remotePlayerProxy
+      ? raycaster.intersectObject(remotePlayerProxy, true)
+      : [];
+    const hitEnemy = opponentHits.length > 0;
+    if (hitEnemy) {
+      impactPoint.copy(opponentHits[0].point);
+      const remoteHit = opponentHits[0].object;
+      const damage = remoteHit?.userData?.isRemoteHead ? 60 : 34;
+      const enemyRole = getOpponentRole();
+      if (enemyRole) {
+        coopClient.sendPlayerHit(enemyRole, damage);
+      }
+      spawnBloodBurst(impactPoint.clone(), null);
+    } else {
+      impactPoint.copy(origin).addScaledVector(raycaster.ray.direction, 24);
+      spawnBulletImpact(impactPoint.clone(), null);
+    }
+
+    coopClient.sendShot({
+      origin: [origin.x, origin.y, origin.z],
+      direction: [
+        raycaster.ray.direction.x,
+        raycaster.ray.direction.y,
+        raycaster.ray.direction.z,
+      ],
+      impact: [impactPoint.x, impactPoint.y, impactPoint.z],
+      spreadX,
+      spreadY,
+      player: getPlayerSnapshot(),
+    });
+    return;
+  }
 
   if (coopState.active && coopState.role === "guest") {
     coopClient.sendShot({
@@ -3602,6 +3902,18 @@ function shoot(spreadX = 0, spreadY = 0) {
 
 function applyRemoteShot(shot) {
   if (!shot || !Array.isArray(shot.origin) || !Array.isArray(shot.direction)) {
+    return;
+  }
+
+  triggerRemoteMuzzleFlash();
+
+  if (coopState.active && coopState.mode === "duel") {
+    if (Array.isArray(shot.impact) && shot.impact.length === 3) {
+      spawnBulletImpact(
+        new Vector3(shot.impact[0], shot.impact[1], shot.impact[2]),
+        null,
+      );
+    }
     return;
   }
 
