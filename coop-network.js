@@ -21,11 +21,14 @@ export function createCoopClient({ url, onMessage, onOpen, onClose, onError }) {
       (socket.readyState === WebSocket.OPEN ||
         socket.readyState === WebSocket.CONNECTING)
     ) {
+      console.log("[COOP-CLIENT] Deja connecte.");
       return;
     }
 
+    console.log("[COOP-CLIENT] Connexion a:", url);
     socket = new WebSocket(url);
     socket.addEventListener("open", () => {
+      console.log("[COOP-CLIENT] WebSocket ouvert, socketId:", socketId);
       flushPendingMessages();
       onOpen?.();
     });
@@ -34,8 +37,11 @@ export function createCoopClient({ url, onMessage, onOpen, onClose, onError }) {
       try {
         message = JSON.parse(event.data);
       } catch {
+        console.error("[COOP-CLIENT] Parse error:", event.data);
         return;
       }
+
+      console.log("[COOP-CLIENT] <- Serveur:", message);
 
       if (message?.socketId) {
         socketId = message.socketId;
@@ -50,17 +56,21 @@ export function createCoopClient({ url, onMessage, onOpen, onClose, onError }) {
       onMessage?.(message);
     });
     socket.addEventListener("close", () => {
+      console.log("[COOP-CLIENT] WebSocket fermé.");
       onClose?.();
     });
     socket.addEventListener("error", (event) => {
+      console.error("[COOP-CLIENT] Erreur:", event);
       onError?.(event);
     });
   }
 
   function send(type, payload = {}) {
     const message = JSON.stringify({ type, ...payload });
+    console.log("[COOP-CLIENT] -> Serveur:", type, payload);
 
     if (!socket) {
+      console.warn("[COOP-CLIENT] Socket pas disponible.");
       return false;
     }
 
@@ -70,10 +80,12 @@ export function createCoopClient({ url, onMessage, onOpen, onClose, onError }) {
     }
 
     if (socket.readyState === WebSocket.CONNECTING) {
+      console.log("[COOP-CLIENT] Queue message (CONNECTING).");
       pendingMessages.push(message);
       return true;
     }
 
+    console.warn("[COOP-CLIENT] Socket state:", socket.readyState);
     return true;
   }
 

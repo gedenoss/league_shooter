@@ -233,7 +233,7 @@ coopMenuEl.innerHTML = `
       <input id="coop-code-input" maxlength="6" inputmode="numeric" placeholder="ENTRER LE CODE" style="width:100%; padding:14px 16px; border-radius:8px; border:1px solid #4a4f57; background:#1a1d22; color:#fff; font:700 18px/1 monospace; letter-spacing:4px; text-transform:uppercase;" />
       <button id="coop-back-btn" type="button" style="padding:14px 16px; border:1px solid #4a4f57; border-radius:8px; background:#111418; color:#fff; font:700 14px/1 monospace; cursor:pointer;">FERMER</button>
     </div>
-    <div id="coop-timer" style="font:700 12px/1 monospace; letter-spacing:1.2px; color:#b6bcc7;">10.0s max</div>
+    <div id="coop-timer" style="font:700 12px/1 monospace; letter-spacing:1.2px; color:#b6bcc7;">–</div>
   </div>
 `;
 document.body.appendChild(coopMenuEl);
@@ -350,7 +350,9 @@ function openCoopMenu() {
   showCoopMenu();
   setCoopStatus("Choisis heberger ou rejoindre.");
   setCoopCode("");
-  setCoopTimer(10);
+  if (coopTimerEl) {
+    coopTimerEl.textContent = "–";
+  }
 }
 
 function closeCoopMenu() {
@@ -381,11 +383,15 @@ function handleCoopMessage(message) {
     return;
   }
 
+  console.log("[COOP] Message recu:", message.type, message);
+
   if (message.type === "hello") {
+    console.log("[COOP] Serveur connecté.");
     return;
   }
 
   if (message.type === "room_created") {
+    console.log("[COOP] Room créée avec code:", message.code);
     coopState.roomCode = message.code;
     coopState.role = "host";
     coopState.waitingForGuest = true;
@@ -1239,7 +1245,7 @@ modeButtonMesh.userData.isZombieModeButton = true;
 modeButtonMesh.userData.isDisabled = false;
 shootTargets.push(modeButtonMesh);
 
-coopButtonMesh = createBox(0.12, 1.25, 1.25, 16.32, 1.85, 0, 0x24435f, false, {
+coopButtonMesh = createBox(0.12, 1.25, 1.25, 15.08, 1.85, 0, 0x24435f, false, {
   roughness: 0.45,
   metalness: 0.08,
 });
@@ -1247,7 +1253,7 @@ const coopButtonPlate = createBox(
   0.06,
   1.65,
   1.65,
-  16.25,
+  15.01,
   1.85,
   0,
   0xebf1f7,
@@ -2861,6 +2867,10 @@ function collidesAt(pos) {
 }
 
 function shoot(spreadX = 0, spreadY = 0) {
+  if (document.pointerLockElement !== renderer.domElement) {
+    renderer.domElement.requestPointerLock();
+  }
+
   const origin = new Vector3();
   playShotSound();
   triggerMuzzleFlash();
