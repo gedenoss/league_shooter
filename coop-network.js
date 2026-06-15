@@ -41,8 +41,6 @@ export function createCoopClient({ url, onMessage, onOpen, onClose, onError }) {
         return;
       }
 
-      console.log("[COOP-CLIENT] <- Serveur:", message);
-
       if (message?.socketId) {
         socketId = message.socketId;
       }
@@ -67,8 +65,6 @@ export function createCoopClient({ url, onMessage, onOpen, onClose, onError }) {
 
   function send(type, payload = {}) {
     const message = JSON.stringify({ type, ...payload });
-    console.log("[COOP-CLIENT] -> Serveur:", type, payload);
-
     if (!socket) {
       console.warn("[COOP-CLIENT] Socket pas disponible.");
       return false;

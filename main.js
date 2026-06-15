@@ -674,22 +674,6 @@ function applyDuelState(state) {
   const otherRole = getOpponentRole();
   const enemy = otherRole ? state.players[otherRole] : null;
 
-  if (me) {
-    player.position.set(
-      me.x ?? player.position.x,
-      me.y ?? player.position.y,
-      me.z ?? player.position.z,
-    );
-    yaw = Number.isFinite(Number(me.yaw)) ? Number(me.yaw) : yaw;
-    pitch = Number.isFinite(Number(me.pitch)) ? Number(me.pitch) : pitch;
-    player.rotation.y = yaw;
-    camera.rotation.x = pitch;
-    playerHealth = Number.isFinite(Number(me.health))
-      ? Math.max(0, Number(me.health))
-      : playerHealth;
-    updateHealthHud();
-  }
-
   if (enemy) {
     updateRemotePlayerProxy(enemy);
     coopState.remotePlayer.health = Number.isFinite(Number(enemy.health))

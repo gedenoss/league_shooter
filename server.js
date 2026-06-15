@@ -203,36 +203,42 @@ function closeRoom(room, reason = "room_closed") {
   rooms.delete(room.code);
 }
 
+const MAX_SHOT_RANGE = 80;
+
 function rayHitsPlayer(origin, direction, player) {
   const ox = origin[0], oy = origin[1], oz = origin[2];
   const dx = direction[0], dy = direction[1], dz = direction[2];
+  const groundY = player.y - 1.65;
 
-  // Body cylinder: radius 0.45, y in [0, 1.4]
+  // Body cylinder: radius 0.55, height groundY to groundY+1.4
   const rx = ox - player.x, rz = oz - player.z;
   const a = dx * dx + dz * dz;
   if (a > 0) {
     const b = 2 * (rx * dx + rz * dz);
-    const c = rx * rx + rz * rz - 0.45 * 0.45;
+    const c = rx * rx + rz * rz - 0.55 * 0.55;
     const disc = b * b - 4 * a * c;
     if (disc >= 0) {
-      const t = (-b - Math.sqrt(disc)) / (2 * a);
-      if (t > 0 && t < 24) {
-        const hitY = oy + dy * t;
-        if (hitY >= 0 && hitY <= 1.4) return { hit: true, headshot: false };
+      const sqrtDisc = Math.sqrt(disc);
+      for (const t of [(-b - sqrtDisc) / (2 * a), (-b + sqrtDisc) / (2 * a)]) {
+        if (t > 0 && t < MAX_SHOT_RANGE) {
+          const hitY = oy + dy * t;
+          if (hitY >= groundY && hitY <= groundY + 1.4) return { hit: true, headshot: false };
+        }
       }
     }
   }
 
-  // Head sphere: center at (player.x, 1.55, player.z), radius 0.25
-  const hx = ox - player.x, hy = oy - 1.55, hz = oz - player.z;
+  // Head sphere: center at (player.x, groundY+1.55, player.z), radius 0.28
+  const headY = groundY + 1.55;
+  const hx = ox - player.x, hy = oy - headY, hz = oz - player.z;
   const a2 = dx * dx + dy * dy + dz * dz;
   if (a2 > 0) {
     const b2 = 2 * (hx * dx + hy * dy + hz * dz);
-    const c2 = hx * hx + hy * hy + hz * hz - 0.25 * 0.25;
+    const c2 = hx * hx + hy * hy + hz * hz - 0.28 * 0.28;
     const disc2 = b2 * b2 - 4 * a2 * c2;
     if (disc2 >= 0) {
       const t = (-b2 - Math.sqrt(disc2)) / (2 * a2);
-      if (t > 0 && t < 24) return { hit: true, headshot: true };
+      if (t > 0 && t < MAX_SHOT_RANGE) return { hit: true, headshot: true };
     }
   }
 
