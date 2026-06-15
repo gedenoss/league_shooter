@@ -1614,48 +1614,12 @@ const navProbeHalfExtents = new Vector3(0.22, 0.85, 0.22);
 const navProbeBox = new Box3();
 const zombieSpawnProbeBox = new Box3();
 const upgradeCatalog = [
-  {
-    id: "attack-speed",
-    title: "+5% VITESSE D'ATTAQUE",
-    subtitle: "Tu tires un peu plus vite.",
-    detail: "Reduce les delais entre les tirs de 5%.",
-    color: [72, 218, 140],
-  },
-  {
-    id: "double-jump",
-    title: "DOUBLE SAUT",
-    subtitle: "Un saut supplementaire en l'air.",
-    detail: "Ajoute +1 saut supplementaire a chaque selection.",
-    color: [110, 184, 255],
-  },
-  {
-    id: "extra-life",
-    title: "+1 VIE",
-    subtitle: "Une chance de plus.",
-    detail: "Quand ta vie tombe a 0, tu reviens a 100 PV.",
-    color: [255, 196, 92],
-  },
-  {
-    id: "run-speed",
-    title: "+5% VITESSE DE COURSE",
-    subtitle: "Tu te deplaces plus vite.",
-    detail: "La vitesse de mouvement augmente de 5%.",
-    color: [255, 122, 92],
-  },
-  {
-    id: "heal-50",
-    title: "+50 PV",
-    subtitle: "Coup de pouce immediate.",
-    detail: "Regagne 50 points de vie instantanement.",
-    color: [108, 255, 157],
-  },
-  {
-    id: "damage-up",
-    title: "+5% DEGATS",
-    subtitle: "Tes tirs frappent plus fort.",
-    detail: "Tous tes degats infliges augmentent de 5%.",
-    color: [255, 104, 168],
-  },
+  { id: "attack-speed", label: "+5% CADENCE",  color: [72, 218, 140] },
+  { id: "double-jump",  label: "+1 SAUT",      color: [110, 184, 255] },
+  { id: "extra-life",   label: "+1 VIE",       color: [255, 196, 92] },
+  { id: "run-speed",    label: "+5% VITESSE",  color: [255, 122, 92] },
+  { id: "heal-50",      label: "+50 PV",       color: [108, 255, 157] },
+  { id: "damage-up",    label: "+5% DEGATS",   color: [255, 104, 168] },
 ];
 const upgradeCatalogById = new Map(
   upgradeCatalog.map((card) => [card.id, card]),
@@ -2050,6 +2014,8 @@ function showDuelOverlay(title, scoreText) {
   duelOverlayEl.style.display = "flex";
 }
 
+let coopHeartbeatInterval = null;
+
 const coopClient = createCoopClient({
   url:
     import.meta.env.VITE_COOP_SERVER_URL ||
@@ -2058,9 +2024,14 @@ const coopClient = createCoopClient({
     console.log("[COOP] CLIENT: WebSocket connecté au serveur.");
     setCoopStatus("Connecte au serveur coop.");
     coopState.connected = true;
+    coopHeartbeatInterval = setInterval(() => {
+      if (coopClient.isConnected()) coopClient.sendPing();
+    }, 25000);
   },
   onClose() {
     console.log("[COOP] CLIENT: WebSocket fermé.");
+    clearInterval(coopHeartbeatInterval);
+    coopHeartbeatInterval = null;
     coopState.connected = false;
     coopState.active = false;
     coopState.mode = "none";
@@ -2631,18 +2602,15 @@ function renderUpgradeMenu(cards, waveIndex) {
       transform:translateY(8px);
       opacity:0;
       transition:transform 0.16s ease, border-color 0.16s ease, opacity 0.16s ease;
-      min-height:220px;
+      min-height:120px;
       display:flex;
       flex-direction:column;
-      gap:8px;
+      gap:12px;
     `;
 
     button.innerHTML = `
-      <div style="font:700 12px/1 monospace; letter-spacing:1px; color:rgb(${card.color[0]}, ${card.color[1]}, ${card.color[2]});">CARTE</div>
-      <div style="font:700 22px/1.05 monospace; letter-spacing:0.2px;">${card.title}</div>
-      <div style="font:400 13px/1.35 monospace; color:#c9c9c9;">${card.subtitle}</div>
-      <div style="margin-top:auto; font:400 12px/1.4 monospace; color:#aab0b7;">${card.detail}</div>
-      <div style="margin-top:8px; display:inline-flex; align-self:flex-start; padding:5px 8px; border:1px solid #5a6068; border-radius:4px; font:700 10px/1 monospace; letter-spacing:0.5px; color:#e7e7e7;">CHOISIR</div>
+      <div style="font:700 26px/1.1 monospace; color:rgb(${card.color[0]}, ${card.color[1]}, ${card.color[2]});">${card.label}</div>
+      <div style="margin-top:auto; display:inline-flex; align-self:flex-start; padding:5px 8px; border:1px solid #5a6068; border-radius:4px; font:700 10px/1 monospace; letter-spacing:0.5px; color:#e7e7e7;">CHOISIR</div>
     `;
 
     button.addEventListener("mouseenter", () => {
@@ -3799,12 +3767,6 @@ function shoot(spreadX = 0, spreadY = 0) {
     const hitEnemy = opponentHits.length > 0;
     if (hitEnemy) {
       impactPoint.copy(opponentHits[0].point);
-      const remoteHit = opponentHits[0].object;
-      const damage = remoteHit?.userData?.isRemoteHead ? 60 : 34;
-      const enemyRole = getOpponentRole();
-      if (enemyRole) {
-        coopClient.sendPlayerHit(enemyRole, damage);
-      }
       spawnBloodBurst(impactPoint.clone(), null);
     } else {
       impactPoint.copy(origin).addScaledVector(raycaster.ray.direction, 24);

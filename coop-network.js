@@ -123,6 +123,9 @@ export function createCoopClient({ url, onMessage, onOpen, onClose, onError }) {
     sendPlayerHit(targetRole, damage) {
       return send("player_hit", { targetRole, damage });
     },
+    sendPing() {
+      return send("ping");
+    },
     sendReplayReady() {
       return send("replay_ready");
     },

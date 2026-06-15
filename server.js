@@ -203,6 +203,42 @@ function closeRoom(room, reason = "room_closed") {
   rooms.delete(room.code);
 }
 
+function rayHitsPlayer(origin, direction, player) {
+  const ox = origin[0], oy = origin[1], oz = origin[2];
+  const dx = direction[0], dy = direction[1], dz = direction[2];
+
+  // Body cylinder: radius 0.45, y in [0, 1.4]
+  const rx = ox - player.x, rz = oz - player.z;
+  const a = dx * dx + dz * dz;
+  if (a > 0) {
+    const b = 2 * (rx * dx + rz * dz);
+    const c = rx * rx + rz * rz - 0.45 * 0.45;
+    const disc = b * b - 4 * a * c;
+    if (disc >= 0) {
+      const t = (-b - Math.sqrt(disc)) / (2 * a);
+      if (t > 0 && t < 24) {
+        const hitY = oy + dy * t;
+        if (hitY >= 0 && hitY <= 1.4) return { hit: true, headshot: false };
+      }
+    }
+  }
+
+  // Head sphere: center at (player.x, 1.55, player.z), radius 0.25
+  const hx = ox - player.x, hy = oy - 1.55, hz = oz - player.z;
+  const a2 = dx * dx + dy * dy + dz * dz;
+  if (a2 > 0) {
+    const b2 = 2 * (hx * dx + hy * dy + hz * dz);
+    const c2 = hx * hx + hy * hy + hz * hz - 0.25 * 0.25;
+    const disc2 = b2 * b2 - 4 * a2 * c2;
+    if (disc2 >= 0) {
+      const t = (-b2 - Math.sqrt(disc2)) / (2 * a2);
+      if (t > 0 && t < 24) return { hit: true, headshot: true };
+    }
+  }
+
+  return { hit: false };
+}
+
 function attachSocketHandlers(ws) {
   ws.on("message", (raw) => {
     let message;
@@ -316,49 +352,32 @@ function attachSocketHandlers(ws) {
       return;
     }
 
-    if (message.type === "shot") {
-      if (!room.duel.running) {
-        return;
-      }
-      const targetSocket =
-        ws.coopRole === "host" ? room.guestSocket : room.hostSocket;
-      send(targetSocket, {
-        type: "duel_shot",
-        shot: message.shot,
-      });
+    if (message.type === "ping") {
+      send(ws, { type: "pong" });
       return;
     }
 
-    if (message.type === "player_hit") {
-      if (!room.duel.running) {
-        return;
-      }
+    if (message.type === "shot") {
+      const targetRole = ws.coopRole === "host" ? "guest" : "host";
+      const targetSocket = ws.coopRole === "host" ? room.guestSocket : room.hostSocket;
 
-      const victimRole = String(message.targetRole || "").toLowerCase();
-      const attackerRole = ws.coopRole;
-      if (!victimRole || victimRole === attackerRole) {
-        return;
-      }
-      if (victimRole !== "host" && victimRole !== "guest") {
-        return;
-      }
+      send(targetSocket, { type: "duel_shot", shot: message.shot });
 
-      const damage = Math.max(0, Number(message.damage) || 0);
-      if (damage <= 0) {
-        return;
-      }
+      if (!room.duel.running) return;
 
-      const victim = room.players[victimRole];
-      victim.health = Math.max(0, victim.health - damage);
+      const shot = message.shot;
+      if (!Array.isArray(shot?.origin) || !Array.isArray(shot?.direction)) return;
 
-      broadcast(room, {
-        type: "player_health",
-        role: victimRole,
-        health: victim.health,
-      });
+      const target = room.players[targetRole];
+      const result = rayHitsPlayer(shot.origin, shot.direction, target);
+      if (!result.hit) return;
 
-      if (victim.health <= 0) {
-        resolveRoundKill(room, victimRole);
+      const damage = result.headshot ? 60 : 34;
+      target.health = Math.max(0, target.health - damage);
+      broadcast(room, { type: "player_health", role: targetRole, health: target.health });
+
+      if (target.health <= 0) {
+        resolveRoundKill(room, targetRole);
       }
       return;
     }
